@@ -1,0 +1,14 @@
+.git
+.github
+**/.DS_Store
+**/__pycache__
+**/*.pyc
+build
+devel
+logs
+*.bag
+*.h5
+*.mp4
+*.mov
+*.avi
+*.mkv
