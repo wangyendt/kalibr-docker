@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-path = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/20240228-60Hz-1920x1200-naked-fix-6mm-cam2imu_largeboard_taurus_test2/data.csv'
+path = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/20240229-60Hz-1920x1200-with-glass-fix-6mm-cam2imu_tinyboard_taurus_test1/data.csv'
 data = pd.read_csv(path)
 h = data.columns
 data = data.values
@@ -20,7 +20,7 @@ acc = data[:,4:7]
 # dn.to_csv(path.replace('data.csv', 'data_n.csv'), index=False)
 plt.figure()
 plt.subplot(211)
-plt.plot(ts, acc)
+plt.plot(ts, acc, 'o-')
 plt.subplot(212)
-plt.plot(ts, gyro)
+plt.plot(ts, gyro, 'o-')
 plt.show()

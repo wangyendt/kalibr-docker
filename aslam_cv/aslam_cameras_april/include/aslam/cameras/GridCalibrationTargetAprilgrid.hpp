@@ -87,6 +87,12 @@ class GridCalibrationTargetAprilgrid : public GridCalibrationTargetBase {
 
   virtual ~GridCalibrationTargetAprilgrid() {};
 
+  /// \brief fill given corners to outImagePoints
+  bool fillGivenObservation(
+            const std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>>& corners,
+            Eigen::MatrixXd& outImagePoints,
+            std::vector<bool> &outCornerObserved) const;
+
   /// \brief extract the calibration target points from an image and write to an observation
   bool computeObservation(const cv::Mat & image,
                           Eigen::MatrixXd & outImagePoints,

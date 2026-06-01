@@ -22,7 +22,7 @@ start_time=$(date +%s)
 configure_device() {
     local device=$1
     local resolution=$2
-    echo 'Calibration start...'
+    echo 'Show data start...'
 
     case $device in
     mercury)
@@ -47,7 +47,7 @@ configure_device() {
 }
 
 # 运行kalibr的函数
-run_kalibr() {
+run_cam_imu_show() {
     echo "Ready to run Kalibr..."
     cd $kalibr_dir || exit
     export KALIBR_MANUAL_FOCAL_LENGTH_INIT=500
@@ -60,24 +60,13 @@ run_kalibr() {
 
     local root=$dataset_root
     local target=$root/aprilgrid.yaml
-
-    # 1. 默认使用标准配置文件
     local camchain_yaml=$root/cam${which_cam}-camchain-${resolution}.yaml
-    local camchain_exp_yaml=$root/cam${which_cam}-camchain-${resolution}-exp.yaml
-    # 2. 如果-exp.yaml文件存在，则覆盖变量
-    if [[ -f "$camchain_exp_yaml" ]]; then
-        camchain_yaml=$camchain_exp_yaml
-        echo "use exp yaml: $camchain_exp_yaml"
-    else
-        echo "use default yaml: $camchain_yaml"
-    fi
-
     local imu_yaml=$root/imu.yaml
     local corner_file=$root/cam${which_cam}_${resolution}_corners.pkl
     local image_timestamp_file=$root/${which_cam}_save_timestamp.txt
     local imu_data_file=$root/data"$fixture_id".csv
 
-    rosrun kalibr kalibr_calibrate_imu_camera \
+    rosrun kalibr kalibr_show_cam_imu_data \
         --target $target --cam $camchain_yaml --imu $imu_yaml \
         --corner_file $corner_file --image_timestamp_file $image_timestamp_file \
         --imu_data_file $imu_data_file --timeoffset-padding 0.04 \
@@ -88,7 +77,7 @@ run_kalibr() {
 
 # 主逻辑
 configure_device $device $resolution
-run_kalibr
+run_cam_imu_show
 
 end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))

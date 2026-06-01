@@ -782,9 +782,10 @@ bool PinholeProjection<DISTORTION_T>::initializeIntrinsics(const std::vector<Gri
   if(f_guesses.empty()) {
     const char* manual_input = std::getenv("KALIBR_MANUAL_FOCAL_LENGTH_INIT");
     if(manual_input != nullptr) {
-      double input_guess;
-      std::cout << "Initialization of focal length failed. Provide manual initialization: " << std::endl;
-      std::cin >> input_guess;
+      double input_guess = std::stod(manual_input); // 将字符串转换为double
+      // double input_guess;
+      // std::cout << "Initialization of focal length failed. Provide manual initialization: " << std::endl;
+      // std::cin >> input_guess;
       SM_ASSERT_GT(std::runtime_error, input_guess, 0.0, 
                 "Focal length needs to be positive.");
       std::cout << "Initializing focal length to " << input_guess << std::endl;
@@ -848,6 +849,7 @@ bool PinholeProjection<DISTORTION_T>::estimateTransformation(
   for (size_t i = 0; i < Ms.size(); ++i) {
     Eigen::Vector3d targetPoint(Ps[i].x, Ps[i].y, Ps[i].z);
     Eigen::Vector2d imagePoint(Ms[i].x, Ms[i].y);
+    // std::cout << "i=" << i << ", Ps: " << Ps[i].x << "," << Ps[i].y << "," << Ps[i].z << "," << Ms[i].x << "," << Ms[i].y << std::endl;
     Eigen::Vector3d backProjection;
 
     if (keypointToEuclidean(imagePoint, backProjection)
@@ -889,6 +891,8 @@ bool PinholeProjection<DISTORTION_T>::estimateTransformation(
       T_camera_model(r, c) = C_camera_model.at<double>(r, c);
     }
   }
+
+  // std::cout << "T_t_c:" << T_camera_model.inverse() << std::endl;
 
   out_T_t_c.set(T_camera_model.inverse());
   return true;

@@ -94,6 +94,38 @@ boost::python::tuple findTarget2(
   return findTarget1(gd, aslam::Time(0, 0), image);
 }
 
+std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>> list_to_vector(const boost::python::list& list) {
+    std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>> vec;
+    for (int i = 0; i < boost::python::len(list); ++i) {
+        boost::python::list sublist = boost::python::extract<boost::python::list>(list[i]);
+        std::vector<std::pair<bool, Eigen::Vector2d>> subvec;
+        for (int j = 0; j < boost::python::len(sublist); ++j) {
+            boost::python::tuple pair = boost::python::extract<boost::python::tuple>(sublist[j]);
+            bool flag = boost::python::extract<bool>(pair[0]);
+            boost::python::object array = pair[1];
+            double x = boost::python::extract<double>(array[0]);
+            double y = boost::python::extract<double>(array[1]);
+            Eigen::Vector2d point(x, y);
+            subvec.emplace_back(flag, point);
+        }
+        vec.push_back(subvec);
+    }
+    return vec;
+}
+
+
+boost::python::tuple findTarget3(
+    aslam::cameras::GridDetector* gd,
+    const aslam::Time & stamp,
+    const boost::python::list& corners_list,
+    const int camera_width, const int camera_height) {
+    std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>> corners = list_to_vector(corners_list);
+    aslam::cameras::GridCalibrationTargetObservation obs(gd->target());
+    bool success = gd->findTargetCorners(corners, stamp, camera_width, camera_height, obs);
+    return boost::python::make_tuple(success, obs);
+}
+
+
 boost::python::tuple findTargetNoTransformation1(aslam::cameras::GridDetector * gd,
                                  const aslam::Time & stamp,
                                  const image_t & image) {
@@ -229,6 +261,7 @@ void exportGridCalibration() {
       .def("target",&GridDetector::target)
       .def("findTarget", &findTarget1)
       .def("findTarget", &findTarget2)
+      .def("findTargetCorners", &findTarget3)
       .def("findTargetNoTransformation", &findTargetNoTransformation1)
       .def("findTargetNoTransformation", &findTargetNoTransformation2)
       .def(init<boost::shared_ptr<CameraGeometryBase>, GridCalibrationTargetBase::Ptr>("GridDetector::GridDetector( boost::shared_ptr<CameraGeometryBase> geometry, GridCalibrationTargetBase::Ptr target)"))

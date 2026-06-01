@@ -1,0 +1,326 @@
+print("importing libraries")
+import sm
+import kalibr_common as kc
+from kalibr_imu_camera_calibration import *
+from kalibr_utils.kalibr_time_utils import *
+
+import numpy as np
+import argparse
+import signal
+import sys
+import os
+import time
+
+import threading
+import pandas as pd
+# import rerun as rr
+from pywayne.tools import wayne_print
+from pywayne.cv.tools import *
+from pywayne.tools import read_yaml_config, write_yaml_config
+# from pywayne.visualization.rerun_utils import RerunUtils
+from pywayne.visualization.pangolin_utils import PangolinViewer
+from pywayne.vio.SE3 import *
+from pywayne.vio.SO3 import *
+import qmt
+import ipdb
+import pickle
+import cv2
+import matplotlib.pyplot as plt
+
+plt.rcParams['font.size'] = 16
+
+# make numpy print prettier
+np.set_printoptions(suppress=True)
+
+def signal_exit(signal, frame):
+    print("")
+    sm.logWarn("Shutting down! (CTRL+C)")
+    sys.exit(1)
+
+#helper to constrain certain arguments to be specified only once
+class Once(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string = None):
+        if getattr(namespace, self.dest) is not None:
+            msg = '{o} can only be specified once'.format(o = option_string)
+            raise argparse.ArgumentError(None, msg)
+        setattr(namespace, self.dest, values)
+
+def parseArgs():
+    class KalibrArgParser(argparse.ArgumentParser):
+        def error(self, message):
+            self.print_help()
+            sm.logError('%s' % message)
+            sys.exit(2)
+        def format_help(self):
+            formatter = self._get_formatter()
+            formatter.add_text(self.description)
+            formatter.add_usage(self.usage, self._actions,
+                                self._mutually_exclusive_groups)
+            for action_group in self._action_groups:
+                formatter.start_section(action_group.title)
+                formatter.add_text(action_group.description)
+                formatter.add_arguments(action_group._group_actions)
+                formatter.end_section()
+            formatter.add_text(self.epilog)
+            return formatter.format_help()     
+        
+    usage = """
+    Example usage to calibrate a camera system against an IMU using an aprilgrid.
+    Temporal calibration is enabled by default.
+    
+    %(prog)s --bag MYROSBAG.bag --cam camchain.yaml --imu imu.yaml \\
+             --target aprilgrid.yaml 
+    
+    camchain.yaml: is the camera-system calibration output of the multiple-camera
+                   calibratin tool (kalibr_calibrate_cameras)
+    
+    example aprilgrid.yaml:       |  example imu.yaml: (ADIS16448)
+        target_type: 'aprilgrid'  |      accelerometer_noise_density: 0.006  
+        tagCols: 6                |      accelerometer_random_walk: 0.0002
+        tagRows: 6                |      gyroscope_noise_density: 0.0004
+        tagSize: 0.088            |      gyroscope_random_walk: 4.0e-06
+        tagSpacing: 0.3           |      update_rate: 200.0"""    
+
+    #setup the argument list
+    parser = KalibrArgParser(description='Calibrate the spatial and temporal parameters of an IMU to a camera chain.', usage=usage)
+    
+    #data source
+    groupData = parser.add_argument_group('Dataset source')
+    groupData.add_argument('--bag', dest='bagfile', nargs=1, help='Ros bag file containing image and imu data (rostopics specified in the yamls)', action=Once) #, required=True)
+    # groupData.add_argument('--h5file', dest='h5file', nargs=1, help='The bin file with the data')
+    groupData.add_argument('--corner_file', dest='corner_file', nargs=1, help='The corner file with the image corners')
+    groupData.add_argument('--image_timestamp_file', dest='image_timestamp_file', nargs=1, help='The timestamp file with the timestamp')
+    groupData.add_argument('--imu_data_file', dest='imu_data_file', nargs=1, help='The imu file with the data')
+    groupData.add_argument('--bag-from-to', metavar='bag_from_to', type=float, nargs=2, help='Use the bag data starting from up to this time [s]')
+    groupData.add_argument('--bag-freq', metavar='bag_freq', type=float, help='Frequency to extract features at [hz]')
+    groupData.add_argument('--perform-synchronization',  action='store_true', dest='perform_synchronization', \
+                          help='Perform a clock synchronization according to \'Clock synchronization algorithms for network measurements\' by Zhang et al. (2002).')
+    groupData.add_argument('--fixture_id', dest='fixture_id', nargs=1, help='current fixture id')
+    
+    #configuration files
+    groupCam = parser.add_argument_group('Camera system configuration')
+    groupCam.add_argument('--cams', dest='chain_yaml', help='Camera system configuration as yaml file', action=Once)
+    groupCam.add_argument('--recompute-camera-chain-extrinsics',  action='store_true', dest='recompute_chain_extrinsics', \
+                          help='Recompute the camera chain extrinsics. This option is exclusively recommended for debugging purposes in order to identify problems with the camera chain extrinsics.')
+    groupCam.add_argument('--reprojection-sigma', type=float, default=1.0, dest='reprojection_sigma', help='Standard deviation of the distribution of reprojected corner points [px]. (default: %(default)s)', required=False)
+    
+    groupImu = parser.add_argument_group('IMU configuration')
+    groupImu.add_argument('--imu', dest='imu_yamls', nargs='+', help='Yaml files holding the IMU noise parameters. The first IMU will be the reference IMU.', required=True, action=Once)
+    groupImu.add_argument('--imu-delay-by-correlation', action='store_true', dest='estimate_imu_delay', \
+                          help='Estimate the delay between multiple IMUs by correlation. By default, no temporal calibration between IMUs will be performed.', required=False)      
+    groupImu.add_argument('--imu-models', nargs='+', dest='imu_models', help='The IMU models to estimate. Currently supported are \'calibrated\', \'scale-misalignment\' and \'scale-misalignment-size-effect\'.', action=Once)
+    
+    groupTarget = parser.add_argument_group('Calibration target')
+    groupTarget.add_argument('--target', dest='target_yaml', help='Calibration target configuration as yaml file', required=True, action=Once)
+    
+    #optimization options
+    groupOpt = parser.add_argument_group('Optimization options')
+    groupOpt.add_argument('--no-time-calibration', action='store_true', dest='no_time', help='Disable the temporal calibration', required=False)      
+    groupOpt.add_argument('--max-iter', type=int, default=30, dest='max_iter', help='Max. iterations (default: %(default)s)', required=False)
+    groupOpt.add_argument('--recover-covariance', action='store_true', dest='recover_cov', help='Recover the covariance of the design variables.', required=False)
+    groupOpt.add_argument('--timeoffset-padding', type=float, default=30.e-3, dest='timeoffset_padding', help='Maximum range in which the timeoffset may change during estimation [s] (default: %(default)s)', required=False)
+
+    #Result options  
+    outputSettings = parser.add_argument_group('Output options')
+    outputSettings.add_argument('--show-extraction', action='store_true', dest='showextraction', help='Show the calibration target extraction. (disables plots)')
+    outputSettings.add_argument('--extraction-stepping', action='store_true', dest='extractionstepping', help='Show each image during calibration target extraction  (disables plots)', required=False)
+    outputSettings.add_argument('--verbose', action='store_true', dest='verbose', help='Verbose output (disables plots)')
+    outputSettings.add_argument('--dont-show-report', action='store_true', dest='dontShowReport', help='Do not show the report on screen after calibration.')
+    outputSettings.add_argument('--export-poses', action='store_true', dest='exportPoses', help='Export the optimized poses into a CSV (time_ns, position, quaterion)')
+
+    #print help if no argument is specified
+    if len(sys.argv)==1:
+        parser.print_help()
+        sys.exit(2)
+    
+    #Parser the argument list
+    try:
+        parsed = parser.parse_args()
+    except:
+        sys.exit(2)
+                 
+    if parsed.verbose:
+        parsed.showextraction = True             
+    
+    #there is a with the gtk plot widget, so we cant plot if we have opencv windows open...
+    #--> disable the plots in these special situations
+    if parsed.showextraction or parsed.extractionstepping or parsed.verbose:
+        parsed.dontShowReport = True
+    
+    return parsed
+
+
+def show_cam_imu_data(parsed):
+    chain_yaml = parsed.chain_yaml
+    corner_file = parsed.corner_file[0]
+    image_timestamp_file = parsed.image_timestamp_file
+    imu_data_file = parsed.imu_data_file[0]
+    target_yaml = parsed.target_yaml
+
+    imu_data = pd.read_csv(imu_data_file, delimiter=',').values
+    ts = imu_data[:, 0]
+    ts -= ts[0]
+    ts /= 1e9
+    gyro = imu_data[:, 1:4]
+    acc = imu_data[:, 4:7]
+
+    # viewer = PangolinViewer(640, 480)
+
+    poses_time, poses = [], []
+    with open(corner_file, 'rb') as pickle_file:
+        # pickle.dump(targetObservations, pickle_file)
+        targetObservations = pickle.load(pickle_file)
+        # rr.init('world', spawn=True)
+        for i, tar_obs in enumerate(targetObservations):
+            # if not viewer.should_not_quit():
+            #     continue
+            T_t_c = tar_obs.T_t_c().T()
+            # corner_projection = tar_obs.getCornerReprojection()
+            corners_idx = tar_obs.getCornersIdx() # int32, corder id list: array([868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 882, 883], dtype=int32)
+            corners_image_frame = tar_obs.getCornersImageFrame() # array([[490.6986084 , 395.46795654], [490.7114563 , 367.47842407], [ 64.56265259, 379.6711731 ]])
+            corners_target_frame = tar_obs.getCornersTargetFrame() # array([[1.16999996, 0.6825    , 0.        ],
+                                                                        #    [1.16999996, 0.75749999, 0.        ],
+                                                                        #    ...,
+                                                                        #    [1.16999996, 1.63499999, 0.        ],
+                                                                        #    [1.245     , 1.63499999, 0.        ]])
+            # image = tar_obs.getImage()
+            has_successful_obs = tar_obs.hasSuccessfulObservation() # True / False
+            im_cols = tar_obs.imCols() # 640
+            im_rows = tar_obs.imRows() # 480
+            image_grid_point = tar_obs.imageGridPoint # ipdb> tar_obs.imageGridPoint(0,0)
+                                                        # (False, array([0., 0.]))
+                                                        # ipdb> tar_obs.imageGridPoint(0,1)
+                                                        # (False, array([0., 0.]))
+                                                        # ipdb> tar_obs.imageGridPoint(11,6)
+                                                        # (False, array([0., 0.]))
+                                                        # ipdb> tar_obs.imageGridPoint(22,5)
+                                                        # (True, array([131.56454468, 258.91549683]))
+            image_point = tar_obs.imagePoint # ipdb> tar_obs.imagePoint(0)
+                                                # (False, array([0., 0.]))
+                                                # ipdb> tar_obs.imagePoint(22*13)
+                                                # (False, array([0., 0.]))
+                                                # ipdb> tar_obs.imagePoint(20*13)
+                                                # (False, array([0., 0.]))
+                                                # ipdb> tar_obs.imagePoint(20*11+6)
+                                                # (False, array([0., 0.]))
+                                                # ipdb> tar_obs.imagePoint(22*11+5)
+                                                # (False, array([0., 0.]))
+                                                # ipdb> tar_obs.imagePoint(22*22+5)
+                                                # (True, array([445.96688843, 324.82199097]))
+            target_cols = tar_obs.target().cols() # 26
+            target_rows = tar_obs.target().rows() # 44
+            target_grid_coord_to_point = tar_obs.target().gridCoordinatesToPoint # 0,0->0, 1,0->26, 2,0->52 
+            target_grid_point = tar_obs.target().gridPoint # 0,0->[0,0,0], 0,1->[0.075,0,0], 1,0->[0,075,0,0], 1,1->[0.075,0.075,0]
+            target_point = tar_obs.target().point # targetObservations[0].target().point(0)
+                                            # array([0., 0., 0.])
+                                            # ipdb> targetObservations[0].target().point(1)
+                                            # array([0.075, 0.   , 0.   ])
+                                            # ipdb> targetObservations[0].target().point(2)
+                                            # array([0.0975, 0.    , 0.    ])
+                                            # ipdb> targetObservations[0].target().point(3)
+                                            # array([0.1725, 0.    , 0.    ])
+                                            # ipdb> targetObservations[0].target().point(22*13)
+                                            # array([0.    , 0.5625, 0.    ])
+            target_point_to_grid_coordinates = tar_obs.target().pointToGridCoordinates # ipdb> targetObservations[0].target().pointToGridCoordinates(0)
+                                                                                        # (0, 0)
+                                                                                        # ipdb> targetObservations[0].target().pointToGridCoordinates(1)
+                                                                                        # (1, 0)
+                                                                                        # ipdb> targetObservations[0].target().pointToGridCoordinates(3)
+                                                                                        # (3, 0)
+                                                                                        # ipdb> targetObservations[0].target().pointToGridCoordinates(22*13)
+                                                                                        # (0, 11)
+            target_points = tar_obs.target().points() # targetObservations[0].target().points()
+                                                        # array([[0.    , 0.    , 0.    ],
+                                                        #        [0.075 , 0.    , 0.    ],
+                                                        #        [0.0975, 0.    , 0.    ],
+                                                        #        ...,
+                                                        #        [1.1475, 2.1225, 0.    ],
+                                                        #        [1.17  , 2.1225, 0.    ],
+                                                        #        [1.245 , 2.1225, 0.    ]])
+            target_size = tar_obs.target().size() # 1144
+            time = tar_obs.time().toSec()
+
+            # viewer.clear_all_visual_elements()
+
+            # viewer.add_points(corners_target_frame, color=[0, 255, 0])
+
+            # ipdb.set_trace()
+            # rr.set_time('imu_ts', time)
+            # rr.log(
+            #     "calib_board",
+            #     rr.Points3D(corners_target_frame, radii=1.0, colors=[0, 255, 0])
+            # )
+            # wayne_print(f'{time}')
+            poses_time.append(time)
+            ax, ang, t = SE3_to_axis_angle_trans(T_t_c)
+            # ipdb.set_trace()
+            poses.append(np.r_[ax, ang, t])
+            # img = np.zeros((im_rows, im_cols, 3), dtype=np.int8)
+            # for corners in corners_image_frame:
+            #     cv2.circle(img, corners.astype(int), 1, [0, 255, 0], -1)
+            # cv2.imshow("haha", img)
+            # cv2.waitKey(0)
+            # viewer.show(delay_time_in_s=0.03)
+        poses = np.array(poses)
+        img_ts = np.loadtxt(image_timestamp_file[0], dtype=float)
+        img_ts -= img_ts[0]
+        img_ts /= 1e9
+        plt.figure(figsize=(10,6))
+        plt.title('image time derivative')
+        plt.plot(img_ts[1:], np.diff(img_ts))
+        plt.grid(True)
+        plt.xlabel('time: (s)')
+        plt.ylabel('time: (s)')
+        plt.figure(figsize=(10,6))
+        plt.title('imu time derivative')
+        plt.plot(ts[1:], np.diff(ts))
+        plt.grid(True)
+        plt.xlabel('time: (s)')
+        plt.ylabel('time: (s)')
+        fig, ax = plt.subplots(1, 2, sharex='all')
+        fig.set_size_inches(10,6)
+        plt.suptitle('imu raw data')
+        ax[0].plot(ts, gyro, '.-')
+        ax[0].set_xlabel('time: (s)')
+        ax[0].set_ylabel('$rad/s$')
+        ax[0].grid(True)
+        ax[0].legend(('x','y','z'))
+        ax[1].plot(ts, acc, '.-')
+        ax[1].set_xlabel('time: (s)')
+        ax[1].set_ylabel('$m/s^2$')
+        ax[1].grid(True)
+        ax[1].legend(('x','y','z'))
+        plt.figure(figsize=(10,6))
+        plt.title('camera time derivative')
+        plt.plot(poses_time[1:], np.diff(poses_time))
+        plt.xlabel('time: (s)')
+        plt.ylabel('time: (s)')
+        plt.grid(True)
+        plt.figure(figsize=(10,6))
+        plt.title('axis of axis-angle')
+        plt.plot(poses_time, poses[:,:3], 'o-')
+        plt.grid(True)
+        plt.legend(('ax-x','ax-y','ax-z'))
+        plt.figure(figsize=(10,6))
+        plt.title('angle (degree) of axis-angle')
+        plt.plot(poses_time, np.degrees(poses[:,3]), 'o-')
+        plt.grid(True)
+        plt.legend(('angle',))
+        plt.figure(figsize=(10,6))
+        plt.title('translation')
+        plt.plot(poses_time, poses[:, 4:], 'o-')
+        plt.grid(True)
+        plt.legend(('tx','ty','tz'))
+        plt.show()
+
+
+
+def main():
+    print('a'*80)
+    parsed = parseArgs()
+    wayne_print(parsed.__dict__, 'green', verbose=2)
+    show_cam_imu_data(parsed=parsed)
+
+
+if __name__ == "__main__":
+    main()

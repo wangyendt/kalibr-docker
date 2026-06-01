@@ -73,6 +73,14 @@ class GridCalibrationTargetBase {
   ///        by row and column
   Eigen::Vector3d gridPoint(size_t r, size_t c) const;
 
+  /// \brief fill given corners to outImagePoints
+  virtual bool fillGivenObservation(
+        const std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>>& corners,
+        Eigen::MatrixXd& outImagePoints,
+        std::vector<bool> &outCornerObserved) const {
+    return true;
+  };
+
   /// \brief extract the calibration target points from an image
   ///        outCornerObserved flags wheter the corresponding point
   ///        in outImagePoints was observed

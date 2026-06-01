@@ -14,12 +14,20 @@ namespace aslam {
       SM_ASSERT_LT_DBG(Exception, threadId, _threadLocalErrors.size(), "Index out of bounds in thread " << threadId);
       SM_ASSERT_LE_DBG(Exception, endIdx, _errorTerms.size(), "Index out of bounds in thread " << threadId);
       Eigen::VectorXd e;
+      double reprojection_error = 0;
+      double imu_error = 0;
       for (size_t i = startIdx; i < endIdx; ++i) {
         SM_ASSERT_TRUE_DBG(Exception, _errorTerms[i] != NULL, "Null error term " << i);
         _threadLocalErrors[threadId] += _errorTerms[i]->evaluateError();
         _errorTerms[i]->getWeightedError(e, useMEstimator);
         _e.segment(_errorTerms[i]->rowBase(), _errorTerms[i]->dimension()) = -e;
+        if (_errorTerms[i]->dimension() == 3)
+          imu_error += _errorTerms[i]->evaluateError();
+        else if (_errorTerms[i]->dimension() == 2)
+          reprojection_error += _errorTerms[i]->evaluateError();
       }
+      std::cout << "imu_error: " << imu_error << std::endl;
+      std::cout << "reprojection_error: " << reprojection_error << std::endl;
     }
 
     struct SafeJobReturnValue {

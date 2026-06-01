@@ -67,11 +67,31 @@ bool GridCalibrationTargetCirclegrid::computeObservation(const cv::Mat & image,
   cv::Size patternSize(cols(), rows());
   cv::Mat centers(size(), 2, CV_64FC1);
 
+	// Blob算子参数
+	cv::SimpleBlobDetector::Params params;
+	/*params.minThreshold = 10;
+	params.maxThreshold = 200;*/
+	params.maxArea = 10e4;
+	params.minArea = 10;
+	params.filterByArea = true;
+  params.minDistBetweenBlobs = 5;
+  // params.filterByCircularity = true;
+  // params.minCircularity = 0.8;  // 圆形度阈值
+  // params.filterByConvexity = true;
+  // params.minConvexity = 0.9;
+  params.filterByInertia = true;
+  params.minInertiaRatio = 0.5;  // 惯性比率，用于区分圆形和椭圆形
+  // params.minDistBetweenBlobs = 100;
+	/*params.minDistBetweenBlobs = 5;
+	params.filterByInertia = false;
+	params.minInertiaRatio = 0.5;*/
+	cv::Ptr<cv::FeatureDetector> blobDetector = cv::SimpleBlobDetector::create(params);
   bool success = false;
   if(_options.useAsymmetricCirclegrid)
     success = cv::findCirclesGrid( image, patternSize, centers, cv::CALIB_CB_ASYMMETRIC_GRID );
   else
-    success = cv::findCirclesGrid( image, patternSize, centers );
+    // success = cv::findCirclesGrid( image, patternSize, centers, cv::CALIB_CB_SYMMETRIC_GRID | cv::CALIB_CB_CLUSTERING, blobDetector);
+    success = cv::findCirclesGrid( image, patternSize, centers, cv::CALIB_CB_SYMMETRIC_GRID, blobDetector);
 
 
   //draw corners
@@ -88,7 +108,7 @@ bool GridCalibrationTargetCirclegrid::computeObservation(const cv::Mat & image,
                   CV_RGB(255,0,0), 3, 8, false);
 
     cv::imshow("Circlegrid corners", imageCopy1);  // OpenCV call
-    cv::waitKey(1);
+    cv::waitKey(500);
   }
 
   //exit here if there is an error

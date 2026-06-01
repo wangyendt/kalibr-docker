@@ -112,6 +112,10 @@ class GridDetector {
 
   bool findTarget(const cv::Mat &image, GridCalibrationTargetObservation &outObservation) const;
 
+  bool findTargetCorners(const std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>> corners, const aslam::Time & stamp, const int camera_width, const int camera_height, GridCalibrationTargetObservation &outObservation) const;
+  
+  bool findTargetCornersNoTransformation(const std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>> corners, const aslam::Time & stamp, const int camera_width, const int camera_height, GridCalibrationTargetObservation &outObservation) const;
+
   /// \brief Find the target but don't estimate the transformation.
   bool findTargetNoTransformation(const cv::Mat &image, const aslam::Time &stamp,
       GridCalibrationTargetObservation & outObservation) const;

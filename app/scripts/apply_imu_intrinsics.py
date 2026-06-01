@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 from pywayne.dsp import butter_bandpass_filter
 
 prefix_path = '/Users/wayne/Documents' if platform.system() == 'Darwin' else '/media/psf'
-imu_path = os.path.join(prefix_path, r'work/data/ost_calibration/imu_to_vpcam/20240222-60Hz-1920x1200-65-naked-fix-6mm-cam2imu_largeboard_taurus_test1/data.csv')
-param_path = os.path.join(prefix_path, r'work/project/20240131 imu产线标定/step_2.imu_intrinsic_calibration/results/20240222_珞石_线下验证/imu_tk_arm_calibration/20240222_luoshi_arm_calib_80%_40pts_test1')
+imu_path = os.path.join(prefix_path, r'work/data/ost_calibration/imu_to_vpcam/20240324-60Hz-1920x1200-cam2imu_largeboard_80mm_taurus_xgj1_test1/data.csv')
+param_path = os.path.join(prefix_path, r'work/project/20240131 imu产线标定/step_2.imu_intrinsic_calibration/results/20240324_艾特讯/imu_tk_arm_calibration/20240324_arm_imu_calibration_xinguangji1_test1')
 acc_param_path = os.path.join(param_path, 'test_imu_acc.calib')
 gyro_param_path = os.path.join(param_path, 'test_imu_gyro.calib')
 
