@@ -11,6 +11,7 @@ import signal
 import sys
 import os
 import time
+import threading
 
 # make numpy print prettier
 np.set_printoptions(suppress=True)
@@ -70,13 +71,18 @@ def parseArgs():
     #data source
     groupData = parser.add_argument_group('Dataset source')
     groupData.add_argument('--bag', dest='bagfile', nargs=1, help='Ros bag file containing image and imu data (rostopics specified in the yamls)', action=Once) #, required=True)
-    groupData.add_argument('--h5file', dest='h5file', nargs=1, help='The bin file with the data')
-    groupData.add_argument('--h5timestampfile', dest='h5timestampfile', nargs=1, help='The timestamp file with the timestamp')
+    groupData.add_argument('--h5file', dest='h5file', nargs=1, help='The H5 file with image data')
+    groupData.add_argument('--corner_file', dest='corner_file', nargs=1, help='The extracted corner pickle file')
+    groupData.add_argument('--h5timestampfile', dest='h5timestampfile', nargs=1, help='The timestamp file for H5 images')
+    groupData.add_argument('--image_timestamp_file', dest='image_timestamp_file', nargs=1, help='The timestamp file for extracted image corners')
     groupData.add_argument('--imufile', dest='imufile', nargs=1, help='The imu file with the data')
+    groupData.add_argument('--imu_data_file', dest='imu_data_file', nargs=1, help='The imu file used with extracted corner data')
     groupData.add_argument('--bag-from-to', metavar='bag_from_to', type=float, nargs=2, help='Use the bag data starting from up to this time [s]')
     groupData.add_argument('--bag-freq', metavar='bag_freq', type=float, help='Frequency to extract features at [hz]')
     groupData.add_argument('--perform-synchronization',  action='store_true', dest='perform_synchronization', \
                           help='Perform a clock synchronization according to \'Clock synchronization algorithms for network measurements\' by Zhang et al. (2002).')
+    groupData.add_argument('--fixture_id', dest='fixture_id', nargs=1, default=['fixture'], help='Current fixture id for corner-file output naming')
+    groupData.add_argument('--trim-imu-edge-count', dest='trim_imu_edge_count', type=int, default=None, help='Number of IMU samples to discard at both ends. Defaults to 1000 for --imu_data_file and 0 otherwise.')
     
     #configuration files
     groupCam = parser.add_argument_group('Camera system configuration')
@@ -120,6 +126,12 @@ def parseArgs():
     except:
         sys.exit(2)
                  
+    if parsed.trim_imu_edge_count is None:
+        parsed.trim_imu_edge_count = 1000 if parsed.imu_data_file else 0
+
+    if not parsed.bagfile and not ((parsed.h5file and parsed.h5timestampfile and parsed.imufile) or (parsed.corner_file and parsed.image_timestamp_file and parsed.imu_data_file)):
+        parser.error('Specify --bag, or --h5file/--h5timestampfile/--imufile, or --corner_file/--image_timestamp_file/--imu_data_file.')
+
     if parsed.verbose:
         parsed.showextraction = True             
     
@@ -132,7 +144,9 @@ def parseArgs():
 
 def main():
     # Parse the arguments
+    print('starting kalibr...')
     parsed = parseArgs();
+    print('parsed arguments...')
     
     #logging modess
     if parsed.verbose:
@@ -205,9 +219,9 @@ def main():
                       biasKnotsPerSecond=50, 
                       doPoseMotionError=False,
                       doBiasMotionError=True,
-                      blakeZisserCam=-1,
-                      huberAccel=-1,
-                      huberGyro=-1,
+                      blakeZisserCam=(10 if parsed.corner_file else -1),
+                      huberAccel=(10 if parsed.corner_file else -1),
+                      huberGyro=(10 if parsed.corner_file else -1),
                       noTimeCalibration=parsed.no_time,
                       noChainExtrinsics=(not parsed.recompute_chain_extrinsics),
                       maxIterations=parsed.max_iter,
@@ -238,8 +252,14 @@ def main():
     print("")
 
     ts_beginning = time.time()
-    # bagtag = os.path.splitext(parsed.bagfile[0])[0]
-    bagtag = os.path.splitext(parsed.h5file[0])[0]
+    if parsed.corner_file:
+        bagtag = os.path.splitext(parsed.corner_file[0])[0] + "-" + parsed.fixture_id[0]
+    elif parsed.h5file:
+        bagtag = os.path.splitext(parsed.h5file[0])[0]
+    elif parsed.bagfile:
+        bagtag = os.path.splitext(parsed.bagfile[0])[0]
+    else:
+        raise RuntimeError('No output tag source available.')
     yamlFilename = bagtag + "-camchain-imucam.yaml"
     iCal.saveCamChainParametersYaml(yamlFilename)
     print("Results written to:")
@@ -256,7 +276,12 @@ def main():
     print("")
     print("Generating result report...")
     reportFile = bagtag + "-report-imucam.pdf"
-    util.generateReport(iCal, filename=reportFile, showOnScreen=not parsed.dontShowReport)
+    if parsed.corner_file:
+        generate_report = lambda iCal, reportFile, parsed: util.generateReport(iCal, filename=reportFile, showOnScreen=not parsed.dontShowReport)
+        generate_result_report_thread = threading.Thread(target=generate_report, args=(iCal, reportFile, parsed))
+        generate_result_report_thread.start()
+    else:
+        util.generateReport(iCal, filename=reportFile, showOnScreen=not parsed.dontShowReport)
     print("  Report written to {0}".format(reportFile))
     print("")
 

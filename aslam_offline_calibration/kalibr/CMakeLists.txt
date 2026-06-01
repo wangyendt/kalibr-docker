@@ -75,9 +75,12 @@ catkin_install_python(
     python/kalibr_camera_validator
     python/kalibr_visualize_calibration
     python/kalibr_calibrate_cameras
+    python/kalibr_calibrate_cameras_simulation
     python/kalibr_visualize_distortion
     python/kalibr_calibrate_imu_camera
     python/kalibr_create_target_pdf
+    python/kalibr_read_data_from_stream
+    python/kalibr_show_cam_imu_data
     python/kalibr_calibrate_rs_cameras
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

@@ -117,6 +117,48 @@ bool GridDetector::findTargetNoTransformation(const cv::Mat & image, const aslam
   return success;
 }
 
+
+bool GridDetector::findTargetCorners(const std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>> corners, const aslam::Time & stamp, const int camera_width, const int camera_height, GridCalibrationTargetObservation &outObservation) const {
+  sm::kinematics::Transformation trafo;
+
+  bool success = findTargetCornersNoTransformation(corners, stamp, camera_width, camera_height, outObservation);
+
+  return success;
+}
+
+bool GridDetector::findTargetCornersNoTransformation(const std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>> corners, const aslam::Time & stamp, const int camera_width, const int camera_height, GridCalibrationTargetObservation &outObservation) const {
+  bool success = false;
+
+  size_t tag_size = corners.size();
+  size_t n_direction = 4;
+
+  for (int tag_id = 0; tag_id < tag_size; ++tag_id) {
+    for (int d = 0; d < n_direction; ++d) {
+      std::pair<bool, Eigen::Vector2d> corner = corners[tag_id][d];
+      bool is_corner_valid = corner.first;
+      Eigen::Vector2d corner_pixel = corner.second;
+      (void)is_corner_valid;
+      (void)corner_pixel;
+    }
+  }
+
+  Eigen::MatrixXd cornerPoints;
+  std::vector<bool> validCorners;
+  success = _target->fillGivenObservation(corners, cornerPoints, validCorners);
+
+  cv::Mat image = cv::Mat::zeros(camera_height, camera_width, CV_8UC3);
+  outObservation.setTarget(_target);
+  outObservation.setImage(image);
+  outObservation.setTime(stamp);
+
+  for (int i = 0; i < cornerPoints.rows(); i++) {
+    if (validCorners[i])
+      outObservation.updateImagePoint(i, cornerPoints.row(i).transpose());
+  }
+
+  return success;
+}
+
 bool GridDetector::findTarget(const cv::Mat & image, const aslam::Time & stamp,
     GridCalibrationTargetObservation & outObservation) const{
   sm::kinematics::Transformation trafo;

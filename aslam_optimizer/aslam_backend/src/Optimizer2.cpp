@@ -236,6 +236,7 @@ namespace aslam {
                     timeErr.start();
                     evaluateError(true);
                     timeErr.stop();
+                    linearSolverFailure = false;
                     deltaJ = _p_J - _J;
                     // This was a regression.
                     if( _trustRegionPolicy->revertOnFailure() )

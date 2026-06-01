@@ -289,3 +289,115 @@ class H5ImageDatasetReader:
     return self.num_images
 
 
+
+
+class CornerImageDatasetReaderIterator(object):
+  def __init__(self, dataset, indices=None):
+    self.dataset = dataset
+    if indices is None:
+      self.indices = np.arange(dataset.numImages())
+    else:
+      self.indices = indices
+    self.iter = self.indices.__iter__()
+
+  def __iter__(self):
+    return self
+
+  def next(self):
+    # required for python 2.x compatibility
+    idx = next(self.iter)
+    return self.dataset.getImage(idx)
+
+  def __next__(self):
+    idx = next(self.iter)
+    return self.dataset.getImage(idx)
+
+
+class CornerImageDatasetReader(object):
+  def __init__(self, cam_data, camera_size, imagetopic, bag_from_to=None, perform_synchronization=False, bag_freq=None):
+    self.cam_data = cam_data
+    self.camera_size = camera_size
+    self.topic = imagetopic
+    self.perform_synchronization = perform_synchronization
+    self.uncompress = None
+    if imagetopic is None:
+      raise RuntimeError("Please pass in a topic name referring to the image stream")
+
+    self.CVB = cv_bridge.CvBridge()
+    self.timestamp = np.linspace(0, len(self.cam_data)-1, len(self.cam_data)) / 30
+    self.indices = np.arange(len(self.timestamp))
+    self.num_images = len(self.indices)
+
+  def __iter__(self):
+    return self.readDataset()
+
+  def readDataset(self):
+    return CornerImageDatasetReaderIterator(self, self.indices)
+
+  def readDatasetShuffle(self):
+    indices = self.indices
+    np.random.shuffle(indices)
+    return CornerImageDatasetReaderIterator(self, indices)
+
+  def getImage(self, idx):
+    single_cam_data = self.cam_data[idx]
+    ts = self.timestamp[idx] * 10 ** 9
+    ts_in_sec = int(ts // (10 ** 9))
+    ts_in_ns = int(ts % (10 ** 9))
+    timestamp = acv.Time(ts_in_sec, ts_in_ns)
+    return timestamp, single_cam_data, self.camera_size
+
+  def numImages(self):
+    return len(self.indices)
+
+
+class CornersImageDatasetReaderIterator(object):
+  def __init__(self, dataset, indices=None):
+    self.dataset = dataset
+    if indices is None:
+      self.indices = np.arange(dataset.numImages())
+    else:
+      self.indices = indices
+    self.iter = self.indices.__iter__()
+
+  def __iter__(self):
+    return self
+
+  def next(self):
+    # required for python 2.x compatibility
+    idx = next(self.iter)
+    return self.dataset.getImage(idx)
+
+  def __next__(self):
+    idx = next(self.iter)
+    return self.dataset.getImage(idx)
+
+
+class CornersImageDatasetReader(object):
+  def __init__(self, corner_file, timestampfile, from_to_in_seconds=None, freq=None, perform_synchronization=False):
+    self.timestampfile = timestampfile
+    self.extracted_corner_save_file = corner_file
+    self.perform_synchronization = perform_synchronization
+    self.timestamp = np.loadtxt(self.timestampfile)
+    self.topic = '/cam0/image_raw'
+    self.indices = np.arange(len(self.timestamp))
+    self.num_images = len(self.indices)
+
+  def __iter__(self):
+    return self.readDataset()
+
+  def readDataset(self):
+    return CornersImageDatasetReaderIterator(self, self.indices)
+
+  def getImage(self, idx):
+    ts = self.timestamp[idx]
+    ts_in_sec = int(ts // (10**9))
+    ts_in_ns = int(ts % (10**9))
+    if self.perform_synchronization:
+      timestamp = acv.Time(self.timestamp_corrector.getLocalTime(ts_in_sec))
+    else:
+      timestamp = acv.Time(ts_in_sec, ts_in_ns)
+    return timestamp, None
+
+  def numImages(self):
+    return self.num_images

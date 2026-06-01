@@ -16,6 +16,8 @@ import math
 import numpy as np
 import pylab as pl
 import scipy.optimize
+import socket
+import threading
 
 
 def initCameraBagDataset(bagfile, topic, from_to, freq, perform_synchronization):
@@ -25,6 +27,14 @@ def initCameraBagDataset(bagfile, topic, from_to, freq, perform_synchronization)
     reader = kc.BagImageDatasetReader(bagfile, topic, bag_from_to=from_to, bag_freq=freq, \
                                       perform_synchronization=perform_synchronization)
     print("\tNumber of images: {0}".format(len(reader.index)))
+    return reader
+
+def initCameraDatasetFromCorners(corner_file, image_timestamp_file, topic, from_to, freq, perform_synchronization):
+    print("Initializing camera corners dataset reader:")
+    print("\tDataset:          {0}".format(corner_file))
+    print("\tTopic:            {0}".format(topic))
+    reader = kc.CornersImageDatasetReader(corner_file, image_timestamp_file, from_to_in_seconds=from_to, freq=freq, perform_synchronization=perform_synchronization)
+    print("\tNumber of images: {0}".format(len(reader.indices)))
     return reader
 
 def initCameraH5Dataset(h5file, timestampfile, topic, from_to, freq, perform_synchronization):
@@ -152,9 +162,10 @@ class IccCamera():
         #initialize a pose spline using the camera poses
         poseSpline = self.initPoseSplineFromCamera( timeOffsetPadding=0.0 )
         
+        t_min, t_max = poseSpline.t_min(), poseSpline.t_max()
         for im in imu.imuData:
             tk = im.stamp.toSec()
-            if tk > poseSpline.t_min() and tk < poseSpline.t_max():        
+            if tk > t_min and tk < t_max:
                 #DV expressions
                 R_i_c = q_i_c_Dv.toExpression()
                 bias = gyroBiasDv.toExpression()   
@@ -199,9 +210,10 @@ class IccCamera():
 
         #estimate gravity in the world coordinate frame as the mean specific force
         a_w = []
+        t_min, t_max = poseSpline.t_min(), poseSpline.t_max()
         for im in imu.imuData:
             tk = im.stamp.toSec()
-            if tk > poseSpline.t_min() and tk < poseSpline.t_max():
+            if tk > t_min and tk < t_max:
                 a_w.append(np.dot(poseSpline.orientation(tk), np.dot(R_i_c, - im.alpha)))
         mean_a_w = np.mean(np.asarray(a_w).T, axis=1)
         self.gravity_w = mean_a_w / np.linalg.norm(mean_a_w) * 9.80655
@@ -242,9 +254,10 @@ class IccCamera():
         omega_measured_norm = []
         omega_predicted_norm = []
         
+        t_min, t_max = poseSpline.t_min(), poseSpline.t_max()
         for im in imu.imuData:
             tk = im.stamp.toSec()
-            if tk > poseSpline.t_min() and tk < poseSpline.t_max():
+            if tk > t_min and tk < t_max:
                 
                 #get imu measurements and spline from camera
                 omega_measured = im.omega
@@ -383,7 +396,7 @@ class IccCamera():
             frame.setGeometry(self.camera.geometry)
             
             #corner uncertainty
-            R = np.eye(2) * self.cornerUncertainty * self.cornerUncertainty
+            R = np.eye(2) * self.cornerUncertainty * self.cornerUncertainty * 2
             invR = np.linalg.inv(R)
             
             for pidx in range(0,imageCornerPoints.shape[1]):
@@ -404,7 +417,7 @@ class IccCamera():
                 
                 #add blake-zisserman m-estimator
                 if blakeZissermanDf>0.0:
-                    mest = aopt.BlakeZissermanMEstimator( blakeZissermanDf )
+                    mest = aopt.CauchyMEstimator( blakeZissermanDf )
                     rerr.setMEstimatorPolicy(mest)
                 
                 problem.addErrorTerm(rerr)  
@@ -437,9 +450,14 @@ class IccCameraChain():
         self.camList = []
         for camNr in range(0, chainConfig.numCameras()):
             camConfig = chainConfig.getCameraParameters(camNr)
-            # dataset = initCameraBagDataset(parsed.bagfile[0], camConfig.getRosTopic(), \
-            #                                parsed.bag_from_to, parsed.bag_freq, parsed.perform_synchronization)
-            dataset = initCameraH5Dataset(parsed.h5file[0], parsed.h5timestampfile[0], camConfig.getRosTopic(), parsed.bag_from_to, parsed.bag_freq, parsed.perform_synchronization)
+            if getattr(parsed, 'corner_file', None) and getattr(parsed, 'image_timestamp_file', None):
+                dataset = initCameraDatasetFromCorners(parsed.corner_file[0], parsed.image_timestamp_file[0], camConfig.getRosTopic(), parsed.bag_from_to, parsed.bag_freq, parsed.perform_synchronization)
+            elif getattr(parsed, 'h5file', None) and getattr(parsed, 'h5timestampfile', None):
+                dataset = initCameraH5Dataset(parsed.h5file[0], parsed.h5timestampfile[0], camConfig.getRosTopic(), parsed.bag_from_to, parsed.bag_freq, parsed.perform_synchronization)
+            elif getattr(parsed, 'bagfile', None):
+                dataset = initCameraBagDataset(parsed.bagfile[0], camConfig.getRosTopic(), parsed.bag_from_to, parsed.bag_freq, parsed.perform_synchronization)
+            else:
+                raise RuntimeError('Please specify --bag, or --h5file/--h5timestampfile, or --corner_file/--image_timestamp_file.')
 
             
             #create the camera
@@ -610,10 +628,20 @@ class IccImu(object):
         self.imuConfig = self.ImuParameters(imuConfig, imuNr)
 
         #load dataset
-        # self.dataset = initImuBagDataset(parsed.bagfile[0], imuConfig.getRosTopic(), \
-        #                                  parsed.bag_from_to, parsed.perform_synchronization)
-        self.dataset = initImuBinDataset(parsed.imufile[0], '/imu0', \
-                                         parsed.bag_from_to, parsed.perform_synchronization)
+        if getattr(parsed, 'imu_data_file', None):
+            self.dataset = initImuBinDataset(parsed.imu_data_file[0], '/imu0', \
+                                             parsed.bag_from_to, parsed.perform_synchronization)
+            self.trimImuEdgeCount = getattr(parsed, 'trim_imu_edge_count', 1000)
+        elif getattr(parsed, 'imufile', None):
+            self.dataset = initImuBinDataset(parsed.imufile[0], '/imu0', \
+                                             parsed.bag_from_to, parsed.perform_synchronization)
+            self.trimImuEdgeCount = getattr(parsed, 'trim_imu_edge_count', 0)
+        elif getattr(parsed, 'bagfile', None):
+            self.dataset = initImuBagDataset(parsed.bagfile[0], imuConfig.getRosTopic(), \
+                                             parsed.bag_from_to, parsed.perform_synchronization)
+            self.trimImuEdgeCount = getattr(parsed, 'trim_imu_edge_count', 0)
+        else:
+            raise RuntimeError('Please specify --bag, --imufile, or --imu_data_file for IMU data.')
         
         #statistics
         self.accelUncertaintyDiscrete, self.accelRandomWalk, self.accelUncertainty = self.imuConfig.getAccelerometerStatistics()
@@ -652,7 +680,11 @@ class IccImu(object):
         
         # Now read the imu measurements.
         imu = []
-        for timestamp, omega, alpha in self.dataset:
+        trim_edge_count = max(0, int(getattr(self, 'trimImuEdgeCount', 0) or 0))
+        index_up_threshold = self.dataset.numMessages() - trim_edge_count
+        for index, (timestamp, omega, alpha) in enumerate(self.dataset):
+            if trim_edge_count and (index < trim_edge_count or index > index_up_threshold):
+                continue
             timestamp = acv.Time( timestamp.toSec() ) 
             imu.append( self.ImuMeasurement(timestamp, omega, alpha, Rgyro, Raccel) )
             iProgress.sample()
@@ -703,7 +735,7 @@ class IccImu(object):
         num_skipped = 0
         
         if mSigma > 0.0:
-            mest = aopt.HuberMEstimator(mSigma)
+            mest = aopt.CauchyMEstimator(mSigma)
         else:
             mest = aopt.NoMEstimator()
             
@@ -746,7 +778,7 @@ class IccImu(object):
         gyroErrors = []
         weight = 1.0/gyroNoiseScale
         if mSigma > 0.0:
-            mest = aopt.HuberMEstimator(mSigma)
+            mest = aopt.CauchyMEstimator(mSigma)
         else:
             mest = aopt.NoMEstimator()
             
@@ -835,9 +867,10 @@ class IccImu(object):
         referenceGyroBiasDv.setActive(True)
         problem.addDesignVariable(referenceGyroBiasDv)
 
+        t_min, t_max = angularVelocity.t_min(), angularVelocity.t_max()
         for im in referenceImu.imuData:
             tk = im.stamp.toSec()
-            if tk > angularVelocity.t_min() and tk < angularVelocity.t_max():        
+            if tk > t_min and tk < t_max:
                 #DV expressions
                 bias = referenceGyroBiasDv.toExpression()   
                 
@@ -1009,9 +1042,10 @@ class IccScaledMisalignedImu(IccImu):
         else:
             mest = aopt.NoMEstimator()
             
+        t_min, t_max = poseSplineDv.spline().t_min(), poseSplineDv.spline().t_max()
         for im in self.imuData:
             tk = im.stamp.toSec() + self.timeOffset
-            if tk > poseSplineDv.spline().t_min() and tk < poseSplineDv.spline().t_max():
+            if tk > t_min and tk < t_max:
                 C_b_w = poseSplineDv.orientation(tk).inverse()
                 a_w = poseSplineDv.linearAcceleration(tk)
                 b_i = self.accelBiasDv.toEuclideanExpression(tk,0)
@@ -1052,9 +1086,10 @@ class IccScaledMisalignedImu(IccImu):
         else:
             mest = aopt.NoMEstimator()
             
+        t_min, t_max = poseSplineDv.spline().t_min(), poseSplineDv.spline().t_max()
         for im in self.imuData:
             tk = im.stamp.toSec() + self.timeOffset
-            if tk > poseSplineDv.spline().t_min() and tk < poseSplineDv.spline().t_max():
+            if tk > t_min and tk < t_max:
                 # GyroscopeError(measurement, invR, angularVelocity, bias)
                 w_b = poseSplineDv.angularVelocityBodyFrame(tk)
                 w_dot_b = poseSplineDv.angularAccelerationBodyFrame(tk)
@@ -1160,9 +1195,10 @@ class IccScaledMisalignedSizeEffectImu(IccScaledMisalignedImu):
         else:
             mest = aopt.NoMEstimator()
             
+        t_min, t_max = poseSplineDv.spline().t_min(), poseSplineDv.spline().t_max()
         for im in self.imuData:
             tk = im.stamp.toSec() + self.timeOffset
-            if tk > poseSplineDv.spline().t_min() and tk < poseSplineDv.spline().t_max():
+            if tk > t_min and tk < t_max:
                 C_b_w = poseSplineDv.orientation(tk).inverse()
                 a_w = poseSplineDv.linearAcceleration(tk)
                 b_i = self.accelBiasDv.toEuclideanExpression(tk,0)

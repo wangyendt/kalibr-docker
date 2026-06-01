@@ -96,6 +96,49 @@ void GridCalibrationTargetAprilgrid::createGridPoints() {
   }
 }
 
+
+/// \brief fill given corners to outImagePoints
+bool GridCalibrationTargetAprilgrid::fillGivenObservation(
+    const std::vector<std::vector<std::pair<bool, Eigen::Vector2d>>>& corners,
+            Eigen::MatrixXd& outImagePoints,
+            std::vector<bool> &outCornerObserved) const {
+
+  bool success = true;
+
+  outCornerObserved.resize(size(), false);
+  outImagePoints.resize(size(), 2);
+
+  int valid_tag_num = 0;
+  for (unsigned int i = 0; i < corners.size(); i++) {
+    auto corner_i = corners[i];
+    unsigned int tagId = i;
+
+    unsigned int baseId = (int) (tagId / (_cols / 2)) * _cols * 2
+        + (tagId % (_cols / 2)) * 2;
+    unsigned int pIdx[] = { baseId, baseId + 1, baseId + (unsigned int) _cols
+        + 1, baseId + (unsigned int) _cols };
+
+    bool tag_valid = true;
+    for (int j = 0; j < 4; j++) {
+      auto corner_i_direction_j = corner_i[j];
+
+      bool is_corner_pixel_valid = corner_i_direction_j.first;
+      Eigen::Vector2d corner_pixel = corner_i_direction_j.second;
+
+      double corner_x = corner_pixel.x();
+      double corner_y = corner_pixel.y();
+
+      outCornerObserved[pIdx[j]] = is_corner_pixel_valid;
+      outImagePoints.row(pIdx[j]) = Eigen::Matrix<double, 1, 2>(corner_x,
+                                                                corner_y);
+      tag_valid = tag_valid && is_corner_pixel_valid;
+    }
+    if (tag_valid) valid_tag_num++;
+  }
+  if (valid_tag_num < _options.minTagsForValidObs) success = false;
+  return success;
+}
+
 /// \brief extract the calibration target points from an image and write to an observation
 bool GridCalibrationTargetAprilgrid::computeObservation(
     const cv::Mat & image, Eigen::MatrixXd & outImagePoints,

@@ -147,7 +147,7 @@ def run_cam_imu(
         "kalibr_calibrate_imu_camera",
         "--target",
         str(target_yaml),
-        "--cam",
+        "--cams",
         str(cam_chain),
         "--imu",
         str(imu_yaml),

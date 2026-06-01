@@ -10,6 +10,7 @@ except ImportError:
 import time
 import copy
 import cv2
+import pickle
 
 def multicoreExtractionWrapper(dataset, detector, taskq, resultq, clearImages, noTransformation):    
     while 1:
@@ -35,7 +36,20 @@ def multicoreExtractionWrapper(dataset, detector, taskq, resultq, clearImages, n
 def extractCornersFromDataset(dataset, detector, multithreading=False, numProcesses=None, clearImages=True, noTransformation=False):
     print("Extracting calibration target corners")    
     targetObservations = []
+
+    if hasattr(dataset, 'extracted_corner_save_file'):
+        with open(dataset.extracted_corner_save_file, 'rb') as pickle_file:
+            return pickle.load(pickle_file)
+
     numImages = dataset.numImages()
+
+    if 'CornerImageDatasetReader' in type(dataset).__name__:
+        for timestamp, corner_tags, camera_size in dataset.readDataset():
+            data = [[(valid, (px, py)) for direction, (valid, px, py) in sorted(corner_tag.items())] for tag_id, corner_tag in corner_tags.items()]
+            success, obs = detector.findTargetCorners(timestamp, data, camera_size['width'], camera_size['height'])
+            if success:
+                targetObservations.append(obs)
+        return targetObservations
     
     # prepare progess bar
     iProgress = sm.Progress2(numImages)

@@ -163,7 +163,7 @@ class BinImuDatasetReader:
     
     def getMessage(self,idx):
         data_piece = self.imu_data[idx].squeeze()
-        # ts = data_piece[0] - int(4.232831611474203)
+        # ts = data_piece[0] - int(4.201910595935335e9)
         ts = data_piece[0]
         ts_in_sec = int(ts // (10**9))
         ts_in_ns = int(ts % (10**9))
