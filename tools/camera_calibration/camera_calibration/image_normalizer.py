@@ -142,9 +142,15 @@ def normalize_image(image: np.ndarray, target_size: Tuple[int, int], preprocess:
 def timestamp_ns(index: int, fps: float) -> int:
     if fps <= 0:
         raise CalibrationError("timestamp fps must be positive")
-    start = 1_000_000_000
     step = int(round(1_000_000_000 / fps))
-    return start + index * step
+    elapsed_nsec = index * step
+    # vio_common's bagcreator parses names as:
+    # secs = text[0:-10], nsecs = text[-9:].
+    # The extra digit before the final 9 nsec digits must stay 0, otherwise
+    # every whole-second boundary aliases to an earlier timestamp.
+    secs = 1 + elapsed_nsec // 1_000_000_000
+    nsecs = elapsed_nsec % 1_000_000_000
+    return int(f"{secs}{nsecs:010d}")
 
 
 def _materialize_camera_sources(

@@ -61,14 +61,23 @@ RUN source /opt/ros/noetic/setup.bash \
   && catkin config --cmake-args -DCMAKE_BUILD_TYPE=Release \
   && catkin build -j"$(nproc)"
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pybind11-dev \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN git clone --depth 1 "${VIO_COMMON_REPO}" "${VIO_COMMON_ROOT}" \
   && if [[ -n "${VIO_COMMON_REF}" ]]; then \
        cd "${VIO_COMMON_ROOT}" \
        && git fetch --depth 1 origin "${VIO_COMMON_REF}" \
        && git checkout --detach FETCH_HEAD; \
-     fi
+     fi \
+  && cmake -S "${VIO_COMMON_ROOT}/timestamp_corrector" -B "${VIO_COMMON_ROOT}/timestamp_corrector/build" \
+       -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
+       -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -fno-lto" \
+  && cmake --build "${VIO_COMMON_ROOT}/timestamp_corrector/build" -- -j1 \
+  && cp "${VIO_COMMON_ROOT}"/timestamp_corrector/build/TimestampCorrector*.so "${VIO_COMMON_PYTHON}/"
 
-ENV PYTHONPATH=${WORKSPACE}/src/kalibr/tools/camera_calibration:${PYTHONPATH}
+ENV PYTHONPATH=${WORKSPACE}/src/kalibr/tools/camera_calibration:${VIO_COMMON_PYTHON}:${VIO_COMMON_ROOT}/timestamp_corrector/build
 
 COPY docker/camera-calibration/entrypoint.sh /usr/local/bin/kalibr-camera-calibration
 RUN chmod +x /usr/local/bin/kalibr-camera-calibration

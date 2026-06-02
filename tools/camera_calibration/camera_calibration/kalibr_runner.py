@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -27,7 +28,7 @@ class KalibrRunSummary:
     result_files: List[Path]
 
 
-def find_vio_common_python() -> Path:
+def find_vio_common_bagcreator() -> Path:
     candidates = []
     env_path = os.environ.get("VIO_COMMON_PYTHON")
     if env_path:
@@ -38,19 +39,29 @@ def find_vio_common_python() -> Path:
         Path("/workspace/vio_common/python"),
     ])
     for path in candidates:
-        if (path / "kalibr_bagcreater.py").exists():
-            return path
+        for script_name in ("kalibr_bagcreater.py", "kalibr_bagcreator.py"):
+            script = path / script_name
+            if script.exists():
+                return script
     raise CalibrationError(
-        "Cannot find vio_common/python/kalibr_bagcreater.py. "
+        "Cannot find vio_common/python/kalibr_bagcreater.py or kalibr_bagcreator.py. "
         "Set VIO_COMMON_PYTHON or rebuild the Docker image."
     )
 
 
-def run_logged(command: Sequence[str], cwd: Path, log_path: Path, env: Optional[Dict[str, str]] = None) -> CommandResult:
+def run_logged(
+    command: Sequence[str],
+    cwd: Path,
+    log_path: Path,
+    env: Optional[Dict[str, str]] = None,
+    stream: bool = False,
+) -> CommandResult:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     full_env = os.environ.copy()
     if env:
         full_env.update(env)
+    if not stream:
+        print(f"Running {' '.join(command[:3])}; full log: {log_path}")
     with log_path.open("w", encoding="utf-8", errors="replace") as log:
         log.write("$ " + " ".join(command) + "\n")
         log.flush()
@@ -65,23 +76,42 @@ def run_logged(command: Sequence[str], cwd: Path, log_path: Path, env: Optional[
         )
         assert process.stdout is not None
         for line in process.stdout:
-            sys.stdout.write(line)
+            if stream:
+                sys.stdout.write(line)
             log.write(line)
         returncode = process.wait()
     return CommandResult(command=list(command), cwd=cwd, log_path=log_path, returncode=returncode)
 
 
-def create_bag(dataset_root: Path, output_bag: Path, log_path: Path) -> CommandResult:
-    vio_common = find_vio_common_python()
+def _stage_input_file(src: Path, work_dir: Path) -> Path:
+    if src is None:
+        raise CalibrationError("Internal error: cannot stage an empty cam-imu input path.")
+    if not src.exists():
+        raise CalibrationError(f"Input file does not exist: {src}")
+    work_dir.mkdir(parents=True, exist_ok=True)
+    dst = work_dir / src.name
+    if dst.exists() or dst.is_symlink():
+        if dst.is_dir():
+            raise CalibrationError(f"Cannot stage input over directory: {dst}")
+        dst.unlink()
+    try:
+        dst.symlink_to(src)
+    except OSError:
+        shutil.copy2(str(src), str(dst))
+    return dst
+
+
+def create_bag(dataset_root: Path, output_bag: Path, log_path: Path, stream: bool = False) -> CommandResult:
+    bagcreator = find_vio_common_bagcreator()
     command = [
         "python3",
-        str(vio_common / "kalibr_bagcreater.py"),
+        str(bagcreator),
         "--folder",
         str(dataset_root),
         "--output_bag",
         str(output_bag),
     ]
-    return run_logged(command, cwd=vio_common, log_path=log_path)
+    return run_logged(command, cwd=bagcreator.parent, log_path=log_path, stream=stream)
 
 
 def _expand_models(model_arg: str, count: int) -> List[str]:
@@ -104,6 +134,7 @@ def run_cam_cam(
     focal_length_init: Optional[float],
     show_report: bool,
     log_path: Path,
+    stream: bool = False,
 ) -> CommandResult:
     bag_path = output_dir / "cam.bag"
     models = _expand_models(model_arg, len(camera_names))
@@ -120,27 +151,47 @@ def run_cam_cam(
     ] + models + ["--topics"] + topics
     if not show_report:
         command.append("--dont-show-report")
+    command.append("--no-multithreading")
 
     env = {"MPLBACKEND": "Agg"}
     if focal_length_init is not None:
         env["KALIBR_MANUAL_FOCAL_LENGTH_INIT"] = str(focal_length_init)
-    return run_logged(command, cwd=output_dir, log_path=log_path, env=env)
+    return run_logged(command, cwd=output_dir, log_path=log_path, env=env, stream=stream)
 
 
 def run_cam_imu(
     target_yaml: Path,
     cam_chain: Path,
     imu_yaml: Path,
-    h5_file: Path,
-    h5_timestamp_file: Path,
-    imu_csv: Path,
+    h5_file: Optional[Path],
+    h5_timestamp_file: Optional[Path],
+    imu_csv: Optional[Path],
+    corner_file: Optional[Path],
+    image_timestamp_file: Optional[Path],
+    imu_data_file: Optional[Path],
+    fixture_id: str,
+    trim_imu_edge_count: Optional[int],
     output_dir: Path,
     timeoffset_padding: float,
     no_time_calibration: bool,
     export_poses: bool,
     focal_length_init: Optional[float],
     log_path: Path,
+    stream: bool = False,
 ) -> CommandResult:
+    work_dir = output_dir / "work_cam_imu"
+    target_yaml = _stage_input_file(target_yaml, work_dir)
+    cam_chain = _stage_input_file(cam_chain, work_dir)
+    imu_yaml = _stage_input_file(imu_yaml, work_dir)
+    if corner_file is not None:
+        corner_file = _stage_input_file(corner_file, work_dir)
+        image_timestamp_file = _stage_input_file(image_timestamp_file, work_dir)
+        imu_data_file = _stage_input_file(imu_data_file, work_dir)
+    else:
+        h5_file = _stage_input_file(h5_file, work_dir)
+        h5_timestamp_file = _stage_input_file(h5_timestamp_file, work_dir)
+        imu_csv = _stage_input_file(imu_csv, work_dir)
+
     command = [
         "rosrun",
         "kalibr",
@@ -151,15 +202,33 @@ def run_cam_imu(
         str(cam_chain),
         "--imu",
         str(imu_yaml),
-        "--h5file",
-        str(h5_file),
-        "--h5timestampfile",
-        str(h5_timestamp_file),
-        "--imufile",
-        str(imu_csv),
         "--timeoffset-padding",
         str(timeoffset_padding),
     ]
+    if corner_file is not None:
+        command.extend([
+            "--corner_file",
+            str(corner_file),
+            "--image_timestamp_file",
+            str(image_timestamp_file),
+            "--imu_data_file",
+            str(imu_data_file),
+            "--fixture_id",
+            fixture_id,
+        ])
+        if trim_imu_edge_count is not None:
+            command.extend(["--trim-imu-edge-count", str(trim_imu_edge_count)])
+    else:
+        command.extend([
+            "--h5file",
+            str(h5_file),
+            "--h5timestampfile",
+            str(h5_timestamp_file),
+            "--imufile",
+            str(imu_csv),
+        ])
+        if trim_imu_edge_count is not None:
+            command.extend(["--trim-imu-edge-count", str(trim_imu_edge_count)])
     if no_time_calibration:
         command.append("--no-time-calibration")
     if export_poses:
@@ -167,8 +236,7 @@ def run_cam_imu(
     env = {"MPLBACKEND": "Agg"}
     if focal_length_init is not None:
         env["KALIBR_MANUAL_FOCAL_LENGTH_INIT"] = str(focal_length_init)
-    return run_logged(command, cwd=output_dir, log_path=log_path, env=env)
-
+    return run_logged(command, cwd=work_dir, log_path=log_path, env=env, stream=stream)
 
 def parse_kalibr_log(log_path: Path, lang: str) -> Tuple[Dict[str, Dict[str, int]], List[UserMessage]]:
     messages: List[UserMessage] = []
@@ -191,6 +259,22 @@ def parse_kalibr_log(log_path: Path, lang: str) -> Tuple[Dict[str, Dict[str, int
         warn(messages, "tls_error", tr(lang, "tls_error"), tr(lang, "tls_error_fix"))
     if "Optimization diverged" in text or "Did not converge" in text or "Max. attemps reached" in text:
         warn(messages, "kalibr_diverged", tr(lang, "kalibr_diverged"), tr(lang, "kalibr_diverged_fix"))
+    if "initialization of focal length" in text.lower() and "failed" in text.lower():
+        warn(messages, "focal_init_failed", tr(lang, "focal_init_failed"), tr(lang, "focal_init_failed_fix"))
+    if "Tried to add second view to a given cameraId & timestamp" in text:
+        warn(messages, "duplicate_timestamp", tr(lang, "duplicate_timestamp"), tr(lang, "duplicate_timestamp_fix"))
+    if "System solution failed" in text or "matrix not positive definite" in text:
+        warn(messages, "linear_solver_warning", tr(lang, "linear_solver_warning"), tr(lang, "linear_solver_warning_fix"))
+    if re.search(r"(^|[^A-Za-z])[-+]?nan([^A-Za-z]|$)|(^|[^A-Za-z])[-+]?inf([^A-Za-z]|$)", text, flags=re.IGNORECASE):
+        warn(messages, "nonfinite_result", tr(lang, "nonfinite_result"), tr(lang, "nonfinite_result_fix"))
+    if "No corners could be extracted" in text or "Extracted corners for 0 images" in text:
+        warn(messages, "no_corners", tr(lang, "no_corners"), tr(lang, "no_corners_fix"))
+    if "time ranges" in text and "do not overlap" in text:
+        warn(messages, "imu_no_overlap", tr(lang, "imu_no_overlap"), tr(lang, "imu_no_overlap_fix"))
+    if "Could not find any IMU messages" in text:
+        warn(messages, "imu_no_messages", tr(lang, "imu_no_messages"), tr(lang, "imu_no_messages_fix"))
+    if "ImportError" in text or "ModuleNotFoundError" in text or "No module named" in text:
+        warn(messages, "python_import_error", tr(lang, "python_import_error"), tr(lang, "python_import_error_fix"))
     return extracted_counts, messages
 
 
@@ -205,7 +289,7 @@ def collect_result_files(output_dir: Path) -> List[Path]:
     ]
     files: List[Path] = []
     for pattern in patterns:
-        files.extend(output_dir.glob(pattern))
+        files.extend(path for path in output_dir.rglob(pattern) if not path.is_symlink())
     dataset_bag = output_dir / "cam.bag"
     if dataset_bag.exists() and dataset_bag not in files:
         files.append(dataset_bag)
@@ -222,6 +306,7 @@ def run_cam_cam_pipeline(
     show_report: bool,
     skip_kalibr: bool,
     lang: str,
+    stream: bool = False,
 ) -> KalibrRunSummary:
     messages: List[UserMessage] = []
     bag_result: Optional[CommandResult] = None
@@ -230,7 +315,7 @@ def run_cam_cam_pipeline(
 
     bag_path = output_dir / "cam.bag"
     if not skip_kalibr:
-        bag_result = create_bag(dataset_root, bag_path, output_dir / "bag_creator.log")
+        bag_result = create_bag(dataset_root, bag_path, output_dir / "bag_creator.log", stream=stream)
         if bag_result.returncode != 0:
             raise CalibrationError(f"Bag creation failed, see {bag_result.log_path}")
         calibration_result = run_cam_cam(
@@ -242,6 +327,7 @@ def run_cam_cam_pipeline(
             focal_length_init=focal_length_init,
             show_report=show_report,
             log_path=output_dir / "kalibr_cam_cam.log",
+            stream=stream,
         )
         extracted_counts, log_messages = parse_kalibr_log(calibration_result.log_path, lang)
         messages.extend(log_messages)

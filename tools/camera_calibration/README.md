@@ -70,7 +70,7 @@ Useful options:
 ```bash
 --lang zh                         # default warning/error language
 --lang en                         # English output
---verbose                         # save debug overlays and more logs
+--verbose                         # stream raw Kalibr logs; cam-cam also saves debug overlays
 --resize 1280x720                 # force normalized image size
 --preprocess clahe                # none, hist-eq, or clahe
 --focal-length-init 2400          # exported to KALIBR_MANUAL_FOCAL_LENGTH_INIT
@@ -84,3 +84,51 @@ Output includes:
 - `kalibr_cam_cam.log`: Kalibr console log.
 - `calibration_report.md` and `calibration_report.json`: diagnostics and result summary.
 - `debug/`: optional verbose diagnostic overlays.
+
+Raw Kalibr stdout is saved to log files by default. Use `--verbose` only when
+you want the full Kalibr progress printed to the terminal.
+
+
+## Camera-IMU one-line examples
+
+H5 image stream plus IMU CSV:
+
+```bash
+docker run --rm \
+  -v /path/to/cam_imu_data:/data:ro \
+  -v /path/to/output:/output \
+  kalibr-camera-calibration:20.04 \
+  cam-imu \
+    --target /data/aprilgrid.yaml \
+    --cam-chain /data/camchain.yaml \
+    --imu-yaml /data/imu.yaml \
+    --h5-file /data/images.h5 \
+    --h5-timestamp-file /data/image_timestamps.txt \
+    --imu-csv /data/imu.csv \
+    --output /output
+```
+
+Pre-extracted corner file plus IMU data, compatible with the ProductionCalibration
+corner-file path:
+
+```bash
+docker run --rm \
+  -v /path/to/cam_imu_data:/data:ro \
+  -v /path/to/output:/output \
+  kalibr-camera-calibration:20.04 \
+  cam-imu \
+    --target /data/aprilgrid.yaml \
+    --cam-chain /data/camchain.yaml \
+    --imu-yaml /data/imu.yaml \
+    --corner-file /data/corners.pkl \
+    --image-timestamp-file /data/image_timestamps.txt \
+    --imu-data-file /data/imu.csv \
+    --fixture-id 1 \
+    --output /output
+```
+
+Both `cam-cam` and `cam-imu` write `calibration_report.md` and
+`calibration_report.json`. The report contains input diagnostics, parsed Kalibr
+quality metrics, warnings/errors, and concrete data-collection suggestions.
+`cam-imu` stages read-only inputs into `work_cam_imu/` so Docker input mounts can
+stay read-only while Kalibr writes its result files.

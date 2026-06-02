@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from .common import CalibrationError, IMAGE_EXTS, VIDEO_EXTS, UserMessage, sorted_natural, warn
+from .common import CalibrationError, IMAGE_EXTS, VIDEO_EXTS, UserMessage, info, sorted_natural
 from .i18n import tr
 
 
@@ -55,11 +55,11 @@ def resolve_input(input_path: Path, lang: str = "zh") -> InputLayout:
         raise CalibrationError(f"Input path does not exist: {input_path}")
 
     if _is_video(input_path):
-        warn(messages, "input_video", tr(lang, "input_video"))
+        info(messages, "input_video", tr(lang, "input_video"))
         return InputLayout([CameraInput(name="cam0", kind="video", image_paths=[], video_path=input_path)], messages)
 
     if _is_image(input_path):
-        warn(messages, "input_direct_images", tr(lang, "input_direct_images"))
+        info(messages, "input_direct_images", tr(lang, "input_direct_images"))
         return InputLayout([CameraInput(name="cam0", kind="images", image_paths=[input_path])], messages)
 
     if not input_path.is_dir():
@@ -76,13 +76,13 @@ def resolve_input(input_path: Path, lang: str = "zh") -> InputLayout:
         raise CalibrationError(f"{tr(lang, 'mixed_input')} {tr(lang, 'mixed_input_fix')}")
 
     if images and not videos:
-        warn(messages, "input_direct_images", tr(lang, "input_direct_images"))
+        info(messages, "input_direct_images", tr(lang, "input_direct_images"))
         return InputLayout([CameraInput(name="cam0", kind="images", image_paths=images)], messages)
 
     if videos and not images:
         if len(videos) != 1:
             raise CalibrationError("A single-camera input directory must contain exactly one video file.")
-        warn(messages, "input_video", tr(lang, "input_video"))
+        info(messages, "input_video", tr(lang, "input_video"))
         return InputLayout([CameraInput(name="cam0", kind="video", image_paths=[], video_path=videos[0])], messages)
 
     if subdirs:
@@ -103,7 +103,7 @@ def resolve_input(input_path: Path, lang: str = "zh") -> InputLayout:
         if len(set(counts.values())) != 1:
             detail = ", ".join(f"{name}={count}" for name, count in counts.items())
             raise CalibrationError(f"{tr(lang, 'count_mismatch')} {detail}. {tr(lang, 'count_mismatch_fix')}")
-        warn(messages, "input_multicam", tr(lang, "input_multicam"))
+        info(messages, "input_multicam", tr(lang, "input_multicam"))
         return InputLayout(cameras, messages)
 
     raise CalibrationError(tr(lang, "no_input"))

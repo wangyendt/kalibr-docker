@@ -4,12 +4,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .common import CalibrationError, UserMessage, ensure_dir, format_messages, parse_size
+from .common import CalibrationError, UserMessage, dedupe_messages, ensure_dir, format_messages, parse_size
 from .diagnostics import analyze_dataset
 from .image_normalizer import prepare_dataset
 from .input_resolver import resolve_input, resolve_target
-from .kalibr_runner import run_cam_cam_pipeline, run_cam_imu
-from .report import write_reports
+from .i18n import tr
+from .kalibr_runner import collect_result_files, parse_kalibr_log, run_cam_cam_pipeline, run_cam_imu
+from .quality import evaluate_cam_cam, evaluate_cam_imu
+from .report import write_cam_imu_report, write_reports
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -38,11 +40,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     cam_imu = subparsers.add_parser("cam-imu", help="Run Kalibr camera-IMU calibration on the fork's H5/CSV path.")
     cam_imu.add_argument("--target", required=True, help="Target YAML file or folder containing one target YAML.")
+    cam_imu.add_argument("--lang", default="zh", choices=["zh", "en"], help="Warning/error language.")
     cam_imu.add_argument("--cam-chain", required=True, help="Camera chain YAML.")
     cam_imu.add_argument("--imu-yaml", required=True, help="IMU noise YAML.")
-    cam_imu.add_argument("--h5-file", required=True, help="H5 image data file.")
-    cam_imu.add_argument("--h5-timestamp-file", required=True, help="Image timestamp text file.")
-    cam_imu.add_argument("--imu-csv", required=True, help="IMU CSV file in Kalibr-compatible order.")
+    cam_imu.add_argument("--h5-file", help="H5 image data file.")
+    cam_imu.add_argument("--h5-timestamp-file", help="Image timestamp text file for --h5-file.")
+    cam_imu.add_argument("--imu-csv", help="IMU CSV file in Kalibr-compatible order for --h5-file.")
+    cam_imu.add_argument("--corner-file", help="Pre-extracted camera corner pickle file.")
+    cam_imu.add_argument("--image-timestamp-file", help="Image timestamp text file for --corner-file.")
+    cam_imu.add_argument("--imu-data-file", help="IMU CSV/TXT file for --corner-file.")
+    cam_imu.add_argument("--fixture-id", default="fixture", help="Fixture id appended to corner-file Kalibr outputs.")
+    cam_imu.add_argument("--trim-imu-edge-count", type=int, default=None, help="Discard this many IMU samples at both ends.")
     cam_imu.add_argument("--output", required=True, help="Output directory.")
     cam_imu.add_argument("--timeoffset-padding", type=float, default=0.03)
     cam_imu.add_argument("--no-time-calibration", dest="no_time_calibration", action="store_true", default=True, help="Disable time-offset calibration. This is the default.")
@@ -50,6 +58,7 @@ def _build_parser() -> argparse.ArgumentParser:
     cam_imu.add_argument("--export-poses", dest="export_poses", action="store_true", default=True, help="Export optimized poses. This is the default.")
     cam_imu.add_argument("--no-export-poses", dest="export_poses", action="store_false", help="Do not export optimized poses.")
     cam_imu.add_argument("--focal-length-init", type=float, default=None)
+    cam_imu.add_argument("--verbose", action="store_true", help="Stream Kalibr output to the terminal in addition to saving logs.")
 
     return parser
 
@@ -57,6 +66,27 @@ def _build_parser() -> argparse.ArgumentParser:
 def _namespace_to_dict(args: argparse.Namespace) -> Dict[str, Any]:
     data = vars(args).copy()
     return {key: str(value) if isinstance(value, Path) else value for key, value in data.items()}
+
+
+def _filter_preliminary_diagnostic_messages(
+    messages: List[UserMessage],
+    extracted_counts: Dict[str, Dict[str, int]],
+) -> List[UserMessage]:
+    unreliable_codes = {"low_detection", "poor_coverage", "concentrated"}
+    reliable_cameras = set()
+    for cam_name, counts in extracted_counts.items():
+        total = counts.get("total", 0)
+        detected = counts.get("detected", 0)
+        if total > 0 and detected / float(total) >= 0.8:
+            reliable_cameras.add(cam_name)
+    if not reliable_cameras:
+        return messages
+    filtered: List[UserMessage] = []
+    for message in messages:
+        if message.code in unreliable_codes and any(message.text.startswith(f"{cam}:") for cam in reliable_cameras):
+            continue
+        filtered.append(message)
+    return filtered
 
 
 def _run_cam_cam(args: argparse.Namespace) -> int:
@@ -98,12 +128,23 @@ def _run_cam_cam(args: argparse.Namespace) -> int:
         show_report=args.show_report,
         skip_kalibr=args.skip_kalibr,
         lang=args.lang,
+        stream=args.verbose,
     )
 
     messages: List[UserMessage] = []
     messages.extend(prepared.messages)
-    messages.extend(diagnostics.messages)
+    messages.extend(_filter_preliminary_diagnostic_messages(diagnostics.messages, kalibr_summary.extracted_counts))
     messages.extend(kalibr_summary.messages)
+    kalibr_returncode = 0
+    if kalibr_summary.calibration_result is not None:
+        kalibr_returncode = kalibr_summary.calibration_result.returncode
+        if kalibr_returncode != 0:
+            messages.append(UserMessage("error", "kalibr_nonzero", tr(args.lang, "kalibr_nonzero"), tr(args.lang, "kalibr_nonzero_fix")))
+    calibration_quality = None
+    if not args.skip_kalibr:
+        calibration_quality = evaluate_cam_cam(output_dir=output_dir, target_size=prepared.target_size, lang=args.lang)
+        messages.extend(calibration_quality.messages)
+    messages = dedupe_messages(messages)
     write_reports(
         output_dir=output_dir,
         prepared=prepared,
@@ -112,33 +153,84 @@ def _run_cam_cam(args: argparse.Namespace) -> int:
         target_yaml=copied_target,
         command_args=_namespace_to_dict(args),
         messages=messages,
+        calibration_quality=calibration_quality,
     )
     if messages:
         print(format_messages(messages))
     print(f"Report written to {output_dir / 'calibration_report.md'}")
+    if any(message.level == "error" for message in messages):
+        return kalibr_returncode or 2
     if kalibr_summary.calibration_result is not None:
-        return kalibr_summary.calibration_result.returncode
+        return kalibr_returncode
     return 0
+
+
+def _has_all(*values: Any) -> bool:
+    return all(value is not None and str(value) != "" for value in values)
 
 
 def _run_cam_imu(args: argparse.Namespace) -> int:
     output_dir = ensure_dir(Path(args.output).expanduser().resolve())
     target_yaml = resolve_target(Path(args.target))
+    cam_chain = Path(args.cam_chain).expanduser().resolve()
+    imu_yaml = Path(args.imu_yaml).expanduser().resolve()
+
+    h5_mode = _has_all(args.h5_file, args.h5_timestamp_file, args.imu_csv)
+    corner_mode = _has_all(args.corner_file, args.image_timestamp_file, args.imu_data_file)
+    if h5_mode == corner_mode:
+        raise CalibrationError(
+            "cam-imu requires exactly one input mode: "
+            "--h5-file/--h5-timestamp-file/--imu-csv or "
+            "--corner-file/--image-timestamp-file/--imu-data-file."
+        )
+
     result = run_cam_imu(
         target_yaml=target_yaml,
-        cam_chain=Path(args.cam_chain).expanduser().resolve(),
-        imu_yaml=Path(args.imu_yaml).expanduser().resolve(),
-        h5_file=Path(args.h5_file).expanduser().resolve(),
-        h5_timestamp_file=Path(args.h5_timestamp_file).expanduser().resolve(),
-        imu_csv=Path(args.imu_csv).expanduser().resolve(),
+        cam_chain=cam_chain,
+        imu_yaml=imu_yaml,
+        h5_file=Path(args.h5_file).expanduser().resolve() if h5_mode else None,
+        h5_timestamp_file=Path(args.h5_timestamp_file).expanduser().resolve() if h5_mode else None,
+        imu_csv=Path(args.imu_csv).expanduser().resolve() if h5_mode else None,
+        corner_file=Path(args.corner_file).expanduser().resolve() if corner_mode else None,
+        image_timestamp_file=Path(args.image_timestamp_file).expanduser().resolve() if corner_mode else None,
+        imu_data_file=Path(args.imu_data_file).expanduser().resolve() if corner_mode else None,
+        fixture_id=args.fixture_id,
+        trim_imu_edge_count=args.trim_imu_edge_count,
         output_dir=output_dir,
         timeoffset_padding=args.timeoffset_padding,
         no_time_calibration=args.no_time_calibration,
         export_poses=args.export_poses,
         focal_length_init=args.focal_length_init,
         log_path=output_dir / "kalibr_cam_imu.log",
+        stream=args.verbose,
     )
+
+    _, log_messages = parse_kalibr_log(result.log_path, args.lang)
+    messages: List[UserMessage] = list(log_messages)
+    if result.returncode != 0:
+        messages.append(UserMessage("error", "kalibr_nonzero", tr(args.lang, "kalibr_nonzero"), tr(args.lang, "kalibr_nonzero_fix")))
+
+    quality = evaluate_cam_imu(output_dir=output_dir, lang=args.lang)
+    messages.extend(quality.messages)
+    messages = dedupe_messages(messages)
+    result_files = collect_result_files(output_dir)
+    write_cam_imu_report(
+        output_dir=output_dir,
+        target_yaml=target_yaml,
+        cam_chain=cam_chain,
+        imu_yaml=imu_yaml,
+        command_args=_namespace_to_dict(args),
+        kalibr_result=result,
+        calibration_quality=quality,
+        messages=messages,
+        result_files=result_files,
+    )
+    if messages:
+        print(format_messages(messages))
     print(f"cam-imu log written to {result.log_path}")
+    print(f"Report written to {output_dir / 'calibration_report.md'}")
+    if any(message.level == "error" for message in messages):
+        return result.returncode or 2
     return result.returncode
 
 

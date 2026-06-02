@@ -82,6 +82,10 @@ def copy_text_file(src: Path, dst: Path) -> None:
     dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def info(messages: List[UserMessage], code: str, text: str, suggestion: str = "") -> None:
+    messages.append(UserMessage(level="info", code=code, text=text, suggestion=suggestion))
+
+
 def warn(messages: List[UserMessage], code: str, text: str, suggestion: str = "") -> None:
     messages.append(UserMessage(level="warning", code=code, text=text, suggestion=suggestion))
 
@@ -90,10 +94,27 @@ def error(messages: List[UserMessage], code: str, text: str, suggestion: str = "
     messages.append(UserMessage(level="error", code=code, text=text, suggestion=suggestion))
 
 
+def dedupe_messages(messages: Sequence[UserMessage]) -> List[UserMessage]:
+    seen = set()
+    result: List[UserMessage] = []
+    for msg in messages:
+        key = (msg.level, msg.code, msg.text, msg.suggestion)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(msg)
+    return result
+
+
 def format_messages(messages: Sequence[UserMessage]) -> str:
     lines: List[str] = []
     for msg in messages:
-        prefix = "ERROR" if msg.level == "error" else "WARNING"
+        if msg.level == "error":
+            prefix = "ERROR"
+        elif msg.level == "warning":
+            prefix = "WARNING"
+        else:
+            prefix = "INFO"
         if msg.suggestion:
             lines.append(f"[{prefix}] {msg.text} Suggestion: {msg.suggestion}")
         else:
