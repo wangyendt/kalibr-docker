@@ -43,6 +43,19 @@ def _quality_lines(quality: Any, output_dir: Path) -> List[str]:
             except ValueError:
                 shown_files.append(str(path))
         lines.append(f"- Parsed files: `{', '.join(shown_files)}`")
+    if getattr(quality, "fovs", None):
+        lines.append("")
+        lines.append("| Camera | Resolution | HFOV | VFOV | DFOV | Source |")
+        lines.append("| --- | ---: | ---: | ---: | ---: | --- |")
+        for fov in quality.fovs:
+            source = f"`{fov.source}`"
+            if getattr(fov, "detail", ""):
+                source += f" ({fov.detail})"
+            lines.append(
+                f"| `{fov.camera}` | `{fov.width}x{fov.height}` | "
+                f"`{fov.hfov_deg:.2f} deg` | `{fov.vfov_deg:.2f} deg` | "
+                f"`{fov.dfov_deg:.2f} deg` | {source} |"
+            )
     if getattr(quality, "metrics", None):
         lines.append("")
         lines.append("| Metric | Value | Status | Detail |")

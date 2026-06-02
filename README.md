@@ -27,6 +27,7 @@ results and a readable diagnostic report.
 - `cam-cam` wrapper
 - `cam-imu` wrapper
 - Markdown/JSON 诊断报告
+- 每个已标定相机的 `hfov` / `vfov` / `dfov` 视场角估算
 
 ### 快速开始
 
@@ -98,6 +99,16 @@ tagSpacing: 0.3
 
 这次 fork 已修复原始 Kalibr 多进程读 bag 的关键问题：worker 启动后会重新打开自己的 rosbag handle，避免 fork 后多个进程共享同一个文件偏移并发 `seek/read`。实测 `cam2cam_clahe` 中 `--fast-extraction always` 已能提取 `20/20`，并且 `Fallback used: False`。
 
+### cam-cam FOV 输出
+
+`cam-cam` 标定完成后，报告会为每个已标定 pinhole 相机计算视场角：
+
+- `hfov`: 水平视场角
+- `vfov`: 垂直视场角
+- `dfov`: 对角视场角
+
+多相机输入会按 `cam0`、`cam1`、... 分别输出 N 组 FOV。FOV 优先使用最终 `cam-camchain.yaml` 中的 `intrinsics` 和 `resolution` 计算，并写入 `calibration_report.md` 与 `calibration_report.json`。
+
 ### cam-imu 输入边界
 
 只有图片文件夹或视频加 target YAML 时，只能直接跑 `cam-cam`。
@@ -151,6 +162,7 @@ The wrapper currently provides:
 - `cam-imu`: ProductionCalibration-compatible corner-file mode and H5 mode.
 - automatic image normalization and bag creation through `vio_common`.
 - human-readable `calibration_report.md` and machine-readable `calibration_report.json`.
+- per-camera `hfov` / `vfov` / `dfov` estimates for calibrated pinhole cameras.
 - Chinese and English warning/error messages.
 
 ### Quick Start
@@ -209,6 +221,14 @@ multiprocessing read failure is detected.
 This fork fixes the original multiprocessing bag-read issue by reopening the
 rosbag inside each worker process. That prevents forked workers from sharing the
 parent process file offset during concurrent `seek/read`.
+
+### cam-cam FOV Output
+
+After `cam-cam` finishes, the report includes one FOV record for each calibrated
+pinhole camera: horizontal FOV, vertical FOV, and diagonal FOV. Multi-camera
+inputs produce one record per `camN`. The values are computed from the final
+`cam-camchain.yaml` intrinsics and resolution, then written to both
+`calibration_report.md` and `calibration_report.json`.
 
 ### cam-imu Requirements
 

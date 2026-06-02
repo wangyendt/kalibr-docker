@@ -86,6 +86,7 @@ Output includes:
 - `cam.bag`: generated ROS bag.
 - `kalibr_cam_cam.log`: Kalibr console log.
 - `calibration_report.md` and `calibration_report.json`: diagnostics and result summary.
+- Per-camera `hfov` / `vfov` / `dfov` for calibrated pinhole cameras.
 - `debug/`: optional verbose diagnostic overlays.
 
 Raw Kalibr stdout is saved to log files by default. Use `--verbose` only when
