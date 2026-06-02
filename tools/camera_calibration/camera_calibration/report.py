@@ -65,6 +65,7 @@ def write_reports(
     messages: Sequence[UserMessage],
     calibration_quality: Any = None,
 ) -> None:
+    lang = str(command_args.get("lang", "zh"))
     data = {
         "target_yaml": str(target_yaml),
         "args": command_args,
@@ -102,20 +103,41 @@ def write_reports(
     ])
 
     for cam in diagnostics.cameras:
+        kalibr_counts = {}
+        if getattr(kalibr_summary, "extracted_counts", None):
+            kalibr_counts = kalibr_summary.extracted_counts.get(cam.camera, {})
+        detector_mismatch = kalibr_counts.get("detected", 0) > 0 and cam.detected_count == 0
         lines.extend([
             f"### {cam.camera}",
             "",
             f"- Images analyzed: `{cam.analyzed_count}/{cam.image_count}`",
             f"- Detection ratio: `{cam.detected_count}/{cam.analyzed_count}` (`{cam.detection_ratio:.2%}`)",
+        ])
+        if kalibr_counts:
+            lines.append(f"- Kalibr extracted: `{kalibr_counts.get('detected', 0)}/{kalibr_counts.get('total', 0)}`")
+        if detector_mismatch:
+            if lang == "zh":
+                lines.append("- Coverage diagnostics: `包装器轻量检测器未复现 Kalibr 角点；角点是否可用以 Kalibr extracted 为准。`")
+            else:
+                lines.append("- Coverage diagnostics: `wrapper detector did not reproduce Kalibr corners; use Kalibr extracted counts for pass/fail.`")
+        lines.extend([
             f"- Image size: `{cam.image_size[0]}x{cam.image_size[1]}`",
             f"- Brightness / contrast / blur: `{cam.mean_brightness:.1f}` / `{cam.mean_contrast:.1f}` / `{cam.mean_blur_laplacian:.1f}`",
-            f"- Corner coverage area ratio: `{cam.coverage_area_ratio:.2f}`",
-            f"- 3x3 zone counts: `{cam.zone_counts}`",
-            f"- Center std x/y: `{cam.center_std[0]:.3f}` / `{cam.center_std[1]:.3f}`",
-            f"- Scale mean/std: `{cam.scale_mean:.3f}` / `{cam.scale_std:.3f}`",
-            f"- Roll proxy std: `{cam.roll_std_deg:.1f} deg`",
-            "",
         ])
+        if detector_mismatch:
+            if lang == "zh":
+                lines.append("- Corner coverage metrics: `包装器轻量检测器不可用`")
+            else:
+                lines.append("- Corner coverage metrics: `not available from wrapper detector`")
+        else:
+            lines.extend([
+                f"- Corner coverage area ratio: `{cam.coverage_area_ratio:.2f}`",
+                f"- 3x3 zone counts: `{cam.zone_counts}`",
+                f"- Center std x/y: `{cam.center_std[0]:.3f}` / `{cam.center_std[1]:.3f}`",
+                f"- Scale mean/std: `{cam.scale_mean:.3f}` / `{cam.scale_std:.3f}`",
+                f"- Roll proxy std: `{cam.roll_std_deg:.1f} deg`",
+            ])
+        lines.append("")
 
     lines.extend([
         "## Calibration Quality",
@@ -132,6 +154,15 @@ def write_reports(
     else:
         lines.append(f"- Return code: `{kalibr_summary.calibration_result.returncode}`")
         lines.append(f"- Log: `{kalibr_summary.calibration_result.log_path.name}`")
+        if getattr(kalibr_summary, "fast_extraction", None):
+            lines.append(f"- Fast extraction mode: `{kalibr_summary.fast_extraction}`")
+            lines.append(f"- Fallback used: `{kalibr_summary.fallback_used}`")
+            if getattr(kalibr_summary, "fallback_reason", ""):
+                lines.append(f"- Fallback reason: `{kalibr_summary.fallback_reason}`")
+        if getattr(kalibr_summary, "calibration_attempts", None):
+            lines.append("- Attempts:")
+            for idx, attempt in enumerate(kalibr_summary.calibration_attempts, start=1):
+                lines.append(f"  - `{idx}` return `{attempt.returncode}`, log `{attempt.log_path.name}`")
         if kalibr_summary.extracted_counts:
             lines.append(f"- Extracted counts: `{kalibr_summary.extracted_counts}`")
     lines.extend([

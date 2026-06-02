@@ -65,6 +65,15 @@ class BagImageDatasetReader(object):
     if bag_freq:
       self.indices = self.truncateIndicesFromFreq(self.indices, bag_freq)
 
+  def reopen(self):
+    try:
+      self.bag.close()
+    except Exception:
+      pass
+    self.bag = rosbag.Bag(self.bagfile)
+    self.CVB = cv_bridge.CvBridge()
+    self.uncompress = None
+
   # sort the ros messegaes by the header time not message time
   def sortByTime(self, indices):
     self.timestamp_corrector = sm.DoubleTimestampCorrector()

@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .common import CalibrationError, UserMessage, dedupe_messages, ensure_dir, format_messages, parse_size
+from .common import CalibrationError, UserMessage, dedupe_messages, ensure_dir, format_messages, info, parse_size
 from .diagnostics import analyze_dataset
 from .image_normalizer import prepare_dataset
 from .input_resolver import resolve_input, resolve_target
@@ -33,6 +33,12 @@ def _build_parser() -> argparse.ArgumentParser:
     cam_cam.add_argument("--max-video-frames", type=int, default=0, help="Limit sampled video frames; 0 means no explicit limit.")
     cam_cam.add_argument("--diagnostic-max-images", type=int, default=200, help="Maximum images per camera for diagnostics.")
     cam_cam.add_argument("--focal-length-init", type=float, default=None, help="Set KALIBR_MANUAL_FOCAL_LENGTH_INIT.")
+    cam_cam.add_argument(
+        "--fast-extraction",
+        default="auto",
+        choices=["auto", "always", "never"],
+        help="cam-cam extraction mode: auto runs fast multiprocessing first and falls back to --no-multithreading on rosbag read failures; always forces fast mode; never forces single-thread extraction.",
+    )
     cam_cam.add_argument("--lang", default="zh", choices=["zh", "en"], help="Warning/error language.")
     cam_cam.add_argument("--verbose", action="store_true", help="Save debug overlays and more intermediate files.")
     cam_cam.add_argument("--show-report", action="store_true", help="Allow Kalibr to open/show its report window.")
@@ -53,6 +59,9 @@ def _build_parser() -> argparse.ArgumentParser:
     cam_imu.add_argument("--trim-imu-edge-count", type=int, default=None, help="Discard this many IMU samples at both ends.")
     cam_imu.add_argument("--output", required=True, help="Output directory.")
     cam_imu.add_argument("--timeoffset-padding", type=float, default=0.03)
+    cam_imu.add_argument("--max-iter", type=int, default=30, help="Maximum optimizer iterations passed to Kalibr.")
+    cam_imu.add_argument("--pose-knots-per-second", type=int, default=100, help="Pose spline knot rate passed to the forked Kalibr cam-imu path.")
+    cam_imu.add_argument("--bias-knots-per-second", type=int, default=50, help="IMU bias spline knot rate passed to the forked Kalibr cam-imu path.")
     cam_imu.add_argument("--no-time-calibration", dest="no_time_calibration", action="store_true", default=True, help="Disable time-offset calibration. This is the default.")
     cam_imu.add_argument("--estimate-time-offset", dest="no_time_calibration", action="store_false", help="Enable time-offset calibration.")
     cam_imu.add_argument("--export-poses", dest="export_poses", action="store_true", default=True, help="Export optimized poses. This is the default.")
@@ -128,12 +137,22 @@ def _run_cam_cam(args: argparse.Namespace) -> int:
         show_report=args.show_report,
         skip_kalibr=args.skip_kalibr,
         lang=args.lang,
+        fast_extraction=args.fast_extraction,
         stream=args.verbose,
     )
 
     messages: List[UserMessage] = []
     messages.extend(prepared.messages)
     messages.extend(_filter_preliminary_diagnostic_messages(diagnostics.messages, kalibr_summary.extracted_counts))
+    for cam_diag in diagnostics.cameras:
+        counts = kalibr_summary.extracted_counts.get(cam_diag.camera, {})
+        if counts.get("detected", 0) > 0 and cam_diag.detected_count == 0:
+            info(
+                messages,
+                "diagnostics_detector_mismatch",
+                f"{cam_diag.camera}: {tr(args.lang, 'diagnostics_detector_mismatch')}",
+                tr(args.lang, "diagnostics_detector_mismatch_fix"),
+            )
     messages.extend(kalibr_summary.messages)
     kalibr_returncode = 0
     if kalibr_summary.calibration_result is not None:
@@ -198,6 +217,9 @@ def _run_cam_imu(args: argparse.Namespace) -> int:
         trim_imu_edge_count=args.trim_imu_edge_count,
         output_dir=output_dir,
         timeoffset_padding=args.timeoffset_padding,
+        max_iter=args.max_iter,
+        pose_knots_per_second=args.pose_knots_per_second,
+        bias_knots_per_second=args.bias_knots_per_second,
         no_time_calibration=args.no_time_calibration,
         export_poses=args.export_poses,
         focal_length_init=args.focal_length_init,

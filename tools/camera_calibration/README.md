@@ -74,6 +74,9 @@ Useful options:
 --resize 1280x720                 # force normalized image size
 --preprocess clahe                # none, hist-eq, or clahe
 --focal-length-init 2400          # exported to KALIBR_MANUAL_FOCAL_LENGTH_INIT
+--fast-extraction auto            # fast multiprocessing first; fallback to single-thread on rosbag read failures
+--fast-extraction always          # force fastest multiprocessing extraction; report error if a rosbag read failure is detected
+--fast-extraction never           # force --no-multithreading for maximum stability
 --skip-kalibr                     # only prepare data and diagnostics
 ```
 
@@ -87,6 +90,14 @@ Output includes:
 
 Raw Kalibr stdout is saved to log files by default. Use `--verbose` only when
 you want the full Kalibr progress printed to the terminal.
+
+`cam-cam` defaults to `--fast-extraction auto`. It first runs Kalibr's
+multiprocessing target extraction. Each worker reopens its own rosbag handle so
+parallel `seek/read` does not share the parent process file descriptor. If the
+log still contains rosbag multiprocessing read failures, the wrapper archives
+the fast attempt as `kalibr_cam_cam_fast.log` / `cam-*-fast.*` and reruns
+automatically with `--no-multithreading`. This keeps the common path fast while
+preventing silent partial-image calibration results.
 
 
 ## Camera-IMU one-line examples
@@ -132,3 +143,9 @@ Both `cam-cam` and `cam-imu` write `calibration_report.md` and
 quality metrics, warnings/errors, and concrete data-collection suggestions.
 `cam-imu` stages read-only inputs into `work_cam_imu/` so Docker input mounts can
 stay read-only while Kalibr writes its result files.
+
+`cam-imu` exposes speed/accuracy knobs while keeping the fork defaults:
+`--max-iter 30`, `--pose-knots-per-second 100`, and
+`--bias-knots-per-second 50`. Lower values can speed up screening runs, but they
+change the optimizer problem and should be compared against the default result
+before being used in production.

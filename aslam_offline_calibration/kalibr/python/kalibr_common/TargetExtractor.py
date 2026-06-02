@@ -13,6 +13,8 @@ import cv2
 import pickle
 
 def multicoreExtractionWrapper(dataset, detector, taskq, resultq, clearImages, noTransformation):    
+    if hasattr(dataset, 'reopen'):
+        dataset.reopen()
     while 1:
         try:
             task = taskq.get_nowait()

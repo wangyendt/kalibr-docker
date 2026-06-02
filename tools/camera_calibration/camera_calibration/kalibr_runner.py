@@ -3,11 +3,11 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .common import CalibrationError, UserMessage, warn
+from .common import CalibrationError, UserMessage, error, warn
 from .i18n import tr
 
 
@@ -26,6 +26,10 @@ class KalibrRunSummary:
     messages: List[UserMessage]
     extracted_counts: Dict[str, Dict[str, int]]
     result_files: List[Path]
+    calibration_attempts: List[CommandResult] = field(default_factory=list)
+    fast_extraction: str = "auto"
+    fallback_used: bool = False
+    fallback_reason: str = ""
 
 
 def find_vio_common_bagcreator() -> Path:
@@ -133,6 +137,7 @@ def run_cam_cam(
     model_arg: str,
     focal_length_init: Optional[float],
     show_report: bool,
+    no_multithreading: bool,
     log_path: Path,
     stream: bool = False,
 ) -> CommandResult:
@@ -151,12 +156,53 @@ def run_cam_cam(
     ] + models + ["--topics"] + topics
     if not show_report:
         command.append("--dont-show-report")
-    command.append("--no-multithreading")
+    if no_multithreading:
+        command.append("--no-multithreading")
 
     env = {"MPLBACKEND": "Agg"}
     if focal_length_init is not None:
         env["KALIBR_MANUAL_FOCAL_LENGTH_INIT"] = str(focal_length_init)
     return run_logged(command, cwd=output_dir, log_path=log_path, env=env, stream=stream)
+
+
+def _cam_cam_result_stems() -> Sequence[Tuple[str, str]]:
+    return (
+        ("cam-camchain.yaml", "cam-camchain-fast.yaml"),
+        ("cam-results-cam.txt", "cam-results-cam-fast.txt"),
+        ("cam-report-cam.pdf", "cam-report-cam-fast.pdf"),
+    )
+
+
+def _archive_fast_cam_cam_outputs(output_dir: Path) -> None:
+    log_path = output_dir / "kalibr_cam_cam.log"
+    archived_log = output_dir / "kalibr_cam_cam_fast.log"
+    if log_path.exists():
+        if archived_log.exists():
+            archived_log.unlink()
+        log_path.rename(archived_log)
+    for src_name, dst_name in _cam_cam_result_stems():
+        src = output_dir / src_name
+        dst = output_dir / dst_name
+        if src.exists():
+            if dst.exists():
+                dst.unlink()
+            src.rename(dst)
+
+
+def detect_cam_cam_fast_extraction_failure(log_path: Path) -> Tuple[bool, str]:
+    if not log_path.exists():
+        return False, ""
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    rosbag_error = (
+        "ROSBagException" in text
+        or "ROSBagFormatException" in text
+        or "Error reading header:" in text
+        or re.search(r"expecting\s+\d+\s+bytes,\s+read\s+\d+", text) is not None
+    )
+    multiprocessing_trace = "Process Process-" in text and "TargetExtractor.py" in text
+    if rosbag_error or multiprocessing_trace:
+        return True, "rosbag multiprocessing read failure"
+    return False, ""
 
 
 def run_cam_imu(
@@ -173,6 +219,9 @@ def run_cam_imu(
     trim_imu_edge_count: Optional[int],
     output_dir: Path,
     timeoffset_padding: float,
+    max_iter: int,
+    pose_knots_per_second: int,
+    bias_knots_per_second: int,
     no_time_calibration: bool,
     export_poses: bool,
     focal_length_init: Optional[float],
@@ -204,6 +253,13 @@ def run_cam_imu(
         str(imu_yaml),
         "--timeoffset-padding",
         str(timeoffset_padding),
+        "--max-iter",
+        str(max_iter),
+        "--pose-knots-per-second",
+        str(pose_knots_per_second),
+        "--bias-knots-per-second",
+        str(bias_knots_per_second),
+        "--dont-show-report",
     ]
     if corner_file is not None:
         command.extend([
@@ -306,18 +362,23 @@ def run_cam_cam_pipeline(
     show_report: bool,
     skip_kalibr: bool,
     lang: str,
+    fast_extraction: str = "auto",
     stream: bool = False,
 ) -> KalibrRunSummary:
     messages: List[UserMessage] = []
     bag_result: Optional[CommandResult] = None
     calibration_result: Optional[CommandResult] = None
+    calibration_attempts: List[CommandResult] = []
     extracted_counts: Dict[str, Dict[str, int]] = {}
+    fallback_used = False
+    fallback_reason = ""
 
     bag_path = output_dir / "cam.bag"
     if not skip_kalibr:
         bag_result = create_bag(dataset_root, bag_path, output_dir / "bag_creator.log", stream=stream)
         if bag_result.returncode != 0:
             raise CalibrationError(f"Bag creation failed, see {bag_result.log_path}")
+        no_multithreading = fast_extraction == "never"
         calibration_result = run_cam_cam(
             dataset_root=dataset_root,
             target_yaml=target_yaml,
@@ -326,15 +387,47 @@ def run_cam_cam_pipeline(
             model_arg=model_arg,
             focal_length_init=focal_length_init,
             show_report=show_report,
+            no_multithreading=no_multithreading,
             log_path=output_dir / "kalibr_cam_cam.log",
             stream=stream,
         )
+        calibration_attempts.append(calibration_result)
         extracted_counts, log_messages = parse_kalibr_log(calibration_result.log_path, lang)
         messages.extend(log_messages)
+        fast_failed, fast_reason = detect_cam_cam_fast_extraction_failure(calibration_result.log_path)
+        if fast_failed and fast_extraction == "auto":
+            fallback_used = True
+            fallback_reason = fast_reason
+            messages = [message for message in messages if message not in log_messages]
+            warn(messages, "fast_extraction_fallback", tr(lang, "fast_extraction_fallback"), tr(lang, "fast_extraction_fallback_fix"))
+            _archive_fast_cam_cam_outputs(output_dir)
+            calibration_attempts[-1].log_path = output_dir / "kalibr_cam_cam_fast.log"
+            calibration_result = run_cam_cam(
+                dataset_root=dataset_root,
+                target_yaml=target_yaml,
+                camera_names=camera_names,
+                output_dir=output_dir,
+                model_arg=model_arg,
+                focal_length_init=focal_length_init,
+                show_report=show_report,
+                no_multithreading=True,
+                log_path=output_dir / "kalibr_cam_cam.log",
+                stream=stream,
+            )
+            calibration_attempts.append(calibration_result)
+            extracted_counts, log_messages = parse_kalibr_log(calibration_result.log_path, lang)
+            messages.extend(log_messages)
+        elif fast_failed and fast_extraction == "always":
+            fallback_reason = fast_reason
+            error(messages, "fast_extraction_failed", tr(lang, "fast_extraction_failed"), tr(lang, "fast_extraction_failed_fix"))
     return KalibrRunSummary(
         bag_result=bag_result,
         calibration_result=calibration_result,
         messages=messages,
         extracted_counts=extracted_counts,
         result_files=collect_result_files(output_dir),
+        calibration_attempts=calibration_attempts,
+        fast_extraction=fast_extraction,
+        fallback_used=fallback_used,
+        fallback_reason=fallback_reason,
     )

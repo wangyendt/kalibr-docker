@@ -74,6 +74,15 @@ docker run --rm -v /ABS/images:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro 
 说明：给 Kalibr 指定初始焦距；当日志中出现初始化不稳定、优化发散、或默认 `Initializing focal length to 500` 明显不符合高分辨率相机时使用。
 docker run --rm -v /ABS/images:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output_focal:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --focal-length-init 2400 --lang zh
 
+说明：cam-cam 默认推荐的快优先模式；先用 Kalibr 多进程角点提取提升速度，如果日志检测到 rosbag 多进程读取异常，会自动归档 fast 结果并用单线程重跑，最终报告会写明 fallback 是否发生。
+docker run --rm -v /ABS/images:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output_auto:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --fast-extraction auto --lang zh
+
+说明：强制 cam-cam 多进程快跑；适合本机高速磁盘、数据量很大且你愿意自己承担风险的场景，wrapper 发现 rosbag 读取异常会直接报 error，不会自动单线程兜底。
+docker run --rm -v /ABS/images:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output_fast:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --fast-extraction always --lang zh
+
+说明：强制 cam-cam 单线程最稳模式；等价于给 Kalibr 加 `--no-multithreading`，适合共享盘、Parallels/虚拟机挂载目录、曾经出现 rosbag 读取异常或追求确定性复现的场景。
+docker run --rm -v /ABS/images:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output_stable:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --fast-extraction never --lang zh
+
 说明：verbose 模式会把 Kalibr 原始输出同步打印到终端，并保存更多中间文件和角点覆盖图；适合调试角点提取、覆盖不足、边缘缺失和优化失败。
 docker run --rm -v /ABS/images:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output_verbose:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --verbose --lang zh
 
@@ -101,6 +110,12 @@ docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output_cam_imu_pcflags:/ou
 
 说明：cam-imu verbose 模式会把 Kalibr 原始日志同步打印到终端；适合检查 IMU 激励不足、gyro/accel residual 异常、时间偏移不稳定、优化失败等问题。
 docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output_cam_imu_verbose:/output kalibr-camera-calibration:20.04 cam-imu --target /data/aprilgrid.yaml --cam-chain /data/camchain.yaml --imu-yaml /data/imu.yaml --corner-file /data/corners.pkl --image-timestamp-file /data/image_timestamps.txt --imu-data-file /data/imu.csv --fixture-id 1 --output /output --verbose --lang zh
+
+说明：cam-imu 快速预检模式；把最大迭代次数降到 10，只用于看残差趋势、时间戳是否对齐、外参是否明显跑飞，不能直接替代正式结果。
+docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output_cam_imu_fastcheck:/output kalibr-camera-calibration:20.04 cam-imu --target /data/aprilgrid.yaml --cam-chain /data/camchain.yaml --imu-yaml /data/imu.yaml --corner-file /data/corners.pkl --image-timestamp-file /data/image_timestamps.txt --imu-data-file /data/imu.csv --fixture-id 1 --output /output --max-iter 10 --no-export-poses --lang zh
+
+说明：cam-imu 降低样条 knot rate 的提速实验命令；`pose/bias knots per second` 会改变优化变量数量和运动模型自由度，只适合和默认 `100/50` 对比后再决定是否采用。
+docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output_cam_imu_knots:/output kalibr-camera-calibration:20.04 cam-imu --target /data/aprilgrid.yaml --cam-chain /data/camchain.yaml --imu-yaml /data/imu.yaml --corner-file /data/corners.pkl --image-timestamp-file /data/image_timestamps.txt --imu-data-file /data/imu.csv --fixture-id 1 --output /output --pose-knots-per-second 60 --bias-knots-per-second 30 --no-export-poses --lang zh
 
 ======================================================================
 报告查看、错误定位、结果复查
