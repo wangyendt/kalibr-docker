@@ -10,7 +10,7 @@
 |---|---|---|---|
 | 第 0 章 | [00_符号表与约定.md](00_符号表与约定.md) | draft | 固定 Micro Lie Theory 主记号、Kalibr 桥接表、残差方向和 Jacobian 方向 |
 | 第 1 章 | [01_问题从哪里来.md](01_问题从哪里来.md) | draft | 从相机、IMU、标定板和连续轨迹解释为什么要这样构建优化问题 |
-| 第 2 章 | `02_坐标系与刚体变换.md` | planned | 从点变换推到 camera residual 的几何链路 |
+| 第 2 章 | [02_坐标系与刚体变换.md](02_坐标系与刚体变换.md) | draft | 从点变换推到 camera residual 的几何链路 |
 | 第 3 章 | `03_最小二乘与残差方向.md` | planned | 解释 covariance、information matrix、robust kernel 和线性化 |
 | 第 4 章 | `04_相机观测模型.md` | planned | 推导 reprojection residual 和 Jacobian |
 | 第 5 章 | `05_连续时间轨迹与B样条.md` | planned | 推导 pose spline、速度、加速度和时间偏移 Jacobian |
