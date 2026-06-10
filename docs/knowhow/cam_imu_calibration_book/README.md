@@ -26,7 +26,7 @@
 | 第 2 章 | [02_坐标系与刚体变换.md](02_坐标系与刚体变换.md) | draft | 从点变换推到 camera residual 的几何链路 |
 | 第 3 章 | [03_最小二乘与残差方向.md](03_最小二乘与残差方向.md) | draft | 优化公共层：covariance、information matrix、robust kernel、线性化、$H$ 和 RHS |
 | 第 4 章 | [04_相机观测模型.md](04_相机观测模型.md) | draft | 推导 reprojection residual、projection/distortion Jacobian、$\mathbf p_c$ 对 pose/extrinsic/time 的链式 Jacobian |
-| 第 5 章 | `05_连续时间轨迹与B样条.md` | planned | 推导 pose spline、姿态/位置控制点、速度、角速度、加速度和 time derivative 的 Jacobian |
+| 第 5 章 | [05_连续时间轨迹与B样条.md](05_连续时间轨迹与B样条.md) | draft | 推导 pose spline、姿态/位置控制点、速度、角速度、加速度和 time derivative 的 Jacobian |
 | 第 6 章 | `06_陀螺仪残差.md` | planned | 推导 gyro residual 对 pose spline、gyro bias、IMU 外参/内参的 Jacobian |
 | 第 7 章 | `07_加速度计残差.md` | planned | 推导 accelerometer residual 对旋转、线加速度、重力、accel bias、lever arm 和 IMU 参数的 Jacobian |
 | 第 8 章 | `08_时间偏移与外参.md` | planned | 汇总 time shift 和 sensor extrinsics 在 camera/IMU residual 中的共同 Jacobian 结构 |
