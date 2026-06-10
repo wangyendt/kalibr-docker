@@ -31,7 +31,7 @@
 | 第 7 章 | [07_加速度计残差.md](07_加速度计残差.md) | draft | 推导 accelerometer residual 对旋转、线加速度、重力、accel bias、lever arm 和 IMU 参数的 Jacobian |
 | 第 8 章 | [08_时间偏移与外参.md](08_时间偏移与外参.md) | draft | 汇总 time shift 和 sensor extrinsics 在 camera/IMU residual 中的共同 Jacobian 结构 |
 | 第 9 章 | [09_bias与motion_prior.md](09_bias与motion_prior.md) | draft | 推导 bias spline、bias motion prior、pose motion prior 和 regularization residual/Jacobian |
-| 第 10 章 | `10_扩展IMU模型.md` | planned | 推导 scale、misalignment、size-effect、acceleration sensitivity 等扩展 IMU 参数的 Jacobian |
+| 第 10 章 | [10_扩展IMU模型.md](10_扩展IMU模型.md) | draft | 推导 scale、misalignment、size-effect、acceleration sensitivity 等扩展 IMU 参数的 Jacobian |
 | 第 11 章 | `11_表达式图与源码对应.md` | planned | 把第 4-10 章公式映射到 Kalibr expression graph、error term、design variable 和源码调用链 |
 | 附录 A | [appendix_A_SO3幂律与Rodrigues公式.md](appendix_A_SO3幂律与Rodrigues公式.md) | draft | 从 $[\boldsymbol\omega]_\times$ 的幂律推导 Rodrigues 公式，并连接第 0.10 节的 $SE(3)$ 指数映射 |
 | 附录 B | `appendix_B_数值验证与最小复现.md` | planned | 用 Python/C++ 最小实现验证 SO(3)/SE(3)、projection、residual、analytic Jacobian 和 finite difference |
