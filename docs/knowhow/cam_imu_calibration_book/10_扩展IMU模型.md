@@ -192,9 +192,35 @@ a = M * (C_i_b * (...))
 aerr = EuclideanError(im.alpha, ..., a + b_i)
 ```
 
+按第 6、7 章的习惯，先写这个扩展模型的 variation 母式，下面两个小节都只是从母式取分支。令 $\mathbf x_i=\mathbf R_{ib}\mathbf u_b$，则预测量是 $\hat{\mathbf a}=\mathbf M_{\mathrm{acc}}\mathbf x_i+\mathbf b_a$。$\mathbf M_{\mathrm{acc}}$ 是普通欧式矩阵参数，扰动就是逐元素相加；$\mathbf x_i$ 的扰动 $\delta\mathbf x_i$ 已经由 7.6 节的母式给出——pose、gravity、外参旋转、lever arm 的全部贡献都汇在它里面。特别是 $\mathbf u_b$ 内部仍然沿用第 7 章的分解：
+
+$$
+\delta\mathbf u_b
+=
+\delta\mathbf h_b+\delta\boldsymbol\ell_b,
+$$
+
+其中 $\delta\mathbf h_b$ 给出 specific-force 分支，$\delta\boldsymbol\ell_b$ 给出 lever-arm 分支。第 10 章不会重新展开这两支，只在它们外面再乘 IMU scale/misalignment、sensing rotation 或 acceleration sensitivity 矩阵。
+
+对乘积 $\mathbf M_{\mathrm{acc}}\mathbf x_i$ 用乘积法则：
+
+$$
+\boxed{
+\delta\mathbf e^a
+=
+\delta\mathbf M_{\mathrm{acc}}\,\mathbf x_i
++
+\mathbf M_{\mathrm{acc}}\,\delta\mathbf x_i
++
+\delta\mathbf b_a.
+}
+$$
+
+三项各有去向：第一项是 10.3.2 的 matrix Jacobian；第二项解释了 10.3.1 的“所有旧分支左乘 $\mathbf M_{\mathrm{acc}}$”；第三项说明 bias 分支保持第 7 章原样——bias 加在 $\mathbf M_{\mathrm{acc}}$ 外面，所以不被左乘。
+
 ### 10.3.1 对旧变量的影响
 
-因为 $\mathbf M_{\mathrm{acc}}$ 在最外层，凡是原来通过 $\mathbf x_i=\mathbf R_{ib}\mathbf u_b$ 进入 residual 的变量，Jacobian 左侧都多乘一个 $\mathbf M_{\mathrm{acc}}$。
+母式第二项 $\mathbf M_{\mathrm{acc}}\,\delta\mathbf x_i$ 说明：凡是原来通过 $\mathbf x_i=\mathbf R_{ib}\mathbf u_b$ 进入 residual 的变量，Jacobian 左侧都多乘一个 $\mathbf M_{\mathrm{acc}}$。
 
 例如 pose 控制点：
 
@@ -250,7 +276,7 @@ $$
 \boxed{
 \mathbf J_{\mathbf e^a,\mathbf d^a_{j+\ell}}
 =
-\mu_\ell^{(0)}(t_k)\mathbf I_3.
+\nu_\ell^{(0)}(t_k)\mathbf I_3.
 }
 $$
 
@@ -343,6 +369,26 @@ w = M * (C_gyro_b * w_b) + Ma * (C_gyro_b * a_b)
 ```
 
 这里源码变量 `Ma` 对应本章的 $\mathbf A_g$，不是 accelerometer scale matrix $\mathbf M_{\mathrm{acc}}$。
+
+和 10.3 一样，先写 variation 母式。预测量 $\hat{\boldsymbol\omega}=\mathbf M_g\boldsymbol\omega_g+\mathbf A_g\mathbf a_g+\mathbf b_g$ 有五个会变的输入：$\mathbf M_g$、$\mathbf A_g$ 是欧式矩阵参数；$\boldsymbol\omega_g$、$\mathbf a_g$ 是复合中间量，它们的扰动再由 $\mathbf R_{gi}$、$\mathbf R_{ib}$、pose 控制点和 lever arm 诱导；$\mathbf b_g$ 是 bias spline 值。对两个乘积分别用乘积法则，再把所有项相加：
+
+$$
+\boxed{
+\delta\mathbf e^\omega
+=
+\delta\mathbf M_g\,\boldsymbol\omega_g
++
+\mathbf M_g\,\delta\boldsymbol\omega_g
++
+\delta\mathbf A_g\,\mathbf a_g
++
+\mathbf A_g\,\delta\mathbf a_g
++
+\delta\mathbf b_g.
+}
+$$
+
+这正是 6.13 节预告过的式子。后面四个小节按变量块把它拆开：10.4.1 取 $\delta\mathbf M_g$、$\delta\mathbf A_g$ 两个矩阵分支；10.4.2 把 $\delta\boldsymbol\omega_g$、$\delta\mathbf a_g$ 沿 $\mathbf R_{gi}$ 展开；10.4.3 沿 $\mathbf R_{ib}$ 展开；10.4.4 沿 pose 控制点、lever arm 和 bias 展开。每个小节求偏导时，其余变量块固定。
 
 ### 10.4.1 对 $\mathbf M_g$ 和 $\mathbf A_g$
 
@@ -881,7 +927,7 @@ $$
 | gravity $\mathbf g_w$ | $-\mathbf M_{\mathrm{acc}}\mathbf R_{ib}\mathbf R_{bw}$ |
 | IMU 外参旋转 $\mathbf R_{ib}$ | $\mathbf M_{\mathrm{acc}}[\mathbf x_i]_\times$ |
 | lever arm $\mathbf r_b$ | $\mathbf M_{\mathrm{acc}}\mathbf R_{ib}\mathbf A_r$ |
-| accel bias 控制点 | $\mu_\ell^{(0)}\mathbf I_3$ |
+| accel bias 控制点 | $\nu_\ell^{(0)}\mathbf I_3$ |
 | $\operatorname{vec}(\mathbf M_{\mathrm{acc}})$ | $[x_{i,1}\mathbf I_3\ x_{i,2}\mathbf I_3\ x_{i,3}\mathbf I_3]$ |
 
 ### 10.7.2 Extended gyro

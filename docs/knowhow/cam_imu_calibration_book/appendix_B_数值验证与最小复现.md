@@ -347,6 +347,8 @@ $$
 (\boldsymbol\omega_b\times\mathbf r_b).
 $$
 
+这一步对应第 7 章的分解 $\mathbf u_b=\mathbf h_b+\boldsymbol\ell_b$。数值验证时也建议分成两组：先验证 $\mathbf h_b=\mathbf R_{bw}(\mathbf a_w-\mathbf g_w)$ 的 rotation/action Jacobian，再验证 $\boldsymbol\ell_b$ 里的 cross product Jacobian。
+
 最容易错的是 cross product 的左右导数。建议分别验证：
 
 $$

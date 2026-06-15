@@ -35,7 +35,7 @@
 | 第 11 章 | [11_表达式图与源码对应.md](11_表达式图与源码对应.md) | draft | 把第 4-10 章公式映射到 Kalibr expression graph、error term、design variable 和源码调用链 |
 | 附录 A | [appendix_A_SO3幂律与Rodrigues公式.md](appendix_A_SO3幂律与Rodrigues公式.md) | draft | 从 $[\boldsymbol\omega]_\times$ 的幂律推导 Rodrigues 公式，并连接第 0.10 节的 $SE(3)$ 指数映射 |
 | 附录 B | [appendix_B_数值验证与最小复现.md](appendix_B_数值验证与最小复现.md) | draft | 用 Python/C++ 最小实现验证 SO(3)/SE(3)、projection、residual、analytic Jacobian 和 finite difference |
-| 速查表 | [jacobian_cheatsheet.md](jacobian_cheatsheet.md) | draft | 铺展开列出主要 residual 对 design variable block 的几何 Jacobian |
+| 附录 C | [appendix_C_Jacobian速查表.md](appendix_C_Jacobian速查表.md) | draft | 调试与数值验证用的 Jacobian 速查：按 residual 分节列出几何 Jacobian 总表，每行标注推导出处 |
 
 ## 写作约定
 
