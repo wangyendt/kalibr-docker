@@ -469,6 +469,9 @@ def parse_summary_text(text):
         elif line.startswith("residual_delta_ceres_minus_kalibr:"):
             for key, value in key_values_from_line(line).items():
                 row["delta_" + key] = value
+        elif line.startswith("imu_intrinsics_delta_ceres_minus_kalibr:"):
+            for key, value in key_values_from_line(line).items():
+                row["imu_delta_" + key] = value
     return row
 
 
@@ -677,6 +680,14 @@ def write_summary_csv(path, rows):
         "delta_reproj_px",
         "delta_gyro_rad_s",
         "delta_accel_m_s2",
+        "imu_delta_accel_M_fro",
+        "imu_delta_accel_M_rel",
+        "imu_delta_gyro_M_fro",
+        "imu_delta_gyro_M_rel",
+        "imu_delta_gyro_A_fro",
+        "imu_delta_gyro_A_rel",
+        "imu_delta_gyro_C_fro",
+        "imu_delta_gyro_C_rel",
         "result_yaml",
         "compare",
         "stdout",

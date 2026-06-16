@@ -78,6 +78,20 @@ Mat4 parseMatrix4AfterColon(const std::string& line) {
   return matrix;
 }
 
+Mat3 parseMatrix3AfterColon(const std::string& line) {
+  const std::vector<double> values = parseDoubles(valueAfterColon(line));
+  if (values.size() != 9) {
+    throw std::runtime_error("expected 9 matrix values in calibration result");
+  }
+  Mat3 matrix = Mat3::Identity();
+  for (int r = 0; r < 3; ++r) {
+    for (int c = 0; c < 3; ++c) {
+      matrix(r, c) = values[static_cast<std::size_t>(3 * r + c)];
+    }
+  }
+  return matrix;
+}
+
 Vec3 parseVector3AfterColon(const std::string& line) {
   const std::vector<double> values = parseDoubles(valueAfterColon(line));
   if (values.size() != 3) {
@@ -106,6 +120,18 @@ void assignResidualMean(const std::string& key, const double mean,
   }
 }
 
+template <typename T>
+void ensureVectorSize(std::vector<T>* values, const int index,
+                      const T& fill_value) {
+  if (!values || index < 0) {
+    return;
+  }
+  const std::size_t required = static_cast<std::size_t>(index) + 1;
+  if (values->size() < required) {
+    values->resize(required, fill_value);
+  }
+}
+
 }  // namespace
 
 CalibrationResultFile readCalibrationResultYaml(
@@ -122,6 +148,8 @@ CalibrationResultFile readCalibrationResultYaml(
   bool have_gravity = false;
   bool in_residual_statistics = false;
   bool in_kalibr_delta = false;
+  bool in_camera_chain = false;
+  int camera_chain_index = -1;
   std::string residual_key;
 
   std::string line;
@@ -135,12 +163,44 @@ CalibrationResultFile readCalibrationResultYaml(
       result.format_version = static_cast<int>(parseScalarAfterColon(trimmed));
       continue;
     }
-    if (startsWith(trimmed, "T_c_b:")) {
+    if (trimmed == "camera_chain:") {
+      in_camera_chain = true;
+      in_residual_statistics = false;
+      in_kalibr_delta = false;
+      camera_chain_index = -1;
+      continue;
+    }
+    if (in_camera_chain) {
+      if (!line.empty() && line[0] != ' ') {
+        in_camera_chain = false;
+        camera_chain_index = -1;
+      } else {
+        if (startsWith(trimmed, "- camera_index:")) {
+          camera_chain_index =
+              static_cast<int>(parseScalarAfterColon(trimmed));
+          ensureVectorSize(&result.camera_T_c_b, camera_chain_index,
+                           Mat4(Mat4::Identity()));
+          ensureVectorSize(&result.camera_time_shift_s, camera_chain_index,
+                           0.0);
+        } else if (startsWith(trimmed, "T_c_b:") &&
+                   camera_chain_index >= 0) {
+          result.camera_T_c_b[static_cast<std::size_t>(camera_chain_index)] =
+              parseMatrix4AfterColon(trimmed);
+        } else if (startsWith(trimmed, "time_shift_s:") &&
+                   camera_chain_index >= 0) {
+          result.camera_time_shift_s
+              [static_cast<std::size_t>(camera_chain_index)] =
+                  parseScalarAfterColon(trimmed);
+        }
+        continue;
+      }
+    }
+    if (startsWith(line, "  T_c_b:")) {
       result.T_c_b = parseMatrix4AfterColon(trimmed);
       have_T_c_b = true;
       continue;
     }
-    if (startsWith(trimmed, "T_b_c:")) {
+    if (startsWith(line, "  T_b_c:")) {
       result.T_b_c = parseMatrix4AfterColon(trimmed);
       continue;
     }
@@ -155,21 +215,59 @@ CalibrationResultFile readCalibrationResultYaml(
       have_gravity = true;
       continue;
     }
+    if (startsWith(trimmed, "accel_M:")) {
+      result.accel_M = parseMatrix3AfterColon(trimmed);
+      result.has_accel_M = true;
+      continue;
+    }
+    if (startsWith(trimmed, "gyro_M:")) {
+      result.gyro_M = parseMatrix3AfterColon(trimmed);
+      result.has_gyro_M = true;
+      continue;
+    }
+    if (startsWith(trimmed, "gyro_accel_sensitivity:")) {
+      result.gyro_accel_sensitivity = parseMatrix3AfterColon(trimmed);
+      result.has_gyro_accel_sensitivity = true;
+      continue;
+    }
+    if (startsWith(trimmed, "gyro_sensing_rotation:")) {
+      result.gyro_sensing_rotation = parseMatrix3AfterColon(trimmed);
+      result.has_gyro_sensing_rotation = true;
+      continue;
+    }
+    if (startsWith(trimmed, "accel_axis_rx_i:")) {
+      result.accel_axis_rx_i = parseVector3AfterColon(trimmed);
+      result.has_accel_axis_rx_i = true;
+      continue;
+    }
+    if (startsWith(trimmed, "accel_axis_ry_i:")) {
+      result.accel_axis_ry_i = parseVector3AfterColon(trimmed);
+      result.has_accel_axis_ry_i = true;
+      continue;
+    }
+    if (startsWith(trimmed, "accel_axis_rz_i:")) {
+      result.accel_axis_rz_i = parseVector3AfterColon(trimmed);
+      result.has_accel_axis_rz_i = true;
+      continue;
+    }
     if (trimmed == "residual_statistics:") {
       in_residual_statistics = true;
       in_kalibr_delta = false;
+      in_camera_chain = false;
       residual_key.clear();
       continue;
     }
     if (trimmed == "kalibr_delta:") {
       in_residual_statistics = false;
       in_kalibr_delta = true;
+      in_camera_chain = false;
       result.has_kalibr_delta = true;
       continue;
     }
     if (!line.empty() && line[0] != ' ') {
       in_residual_statistics = false;
       in_kalibr_delta = false;
+      in_camera_chain = false;
       residual_key.clear();
     }
 

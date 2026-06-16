@@ -134,6 +134,24 @@ camera: 640x400 model=pinhole distortion=radtan fx=...
 
 当前相机内参仍作为固定配置参与投影，不作为 Ceres 参数块优化；优化变量仍是 camera-to-IMU 外参、time shift、pose spline、bias spline、gravity 和可选 IMU intrinsics。`tests/test_math.cpp` 对上表所有投影组合的 `projectWithJacobian()` 做中心差分验证。
 
+## 多相机 Cam-IMU
+
+Kalibr 的 `kalibr_calibrate_imu_camera --cams camchain.yaml` 支持 camera chain。`ceres_cam_imu` 现在也支持同一类输入:传一个包含 `cam0/cam1/...` 的共享 camchain YAML,再按 camera 顺序重复传 `--corners`。
+
+```bash
+ceres_cam_imu/build/calibrate_cam_imu \
+  --cam camchain.yaml \
+  --imu imu.yaml \
+  --target aprilgrid.yaml \
+  --imu-data imu.csv \
+  --corners cam0_corners.csv \
+  --corners cam1_corners.csv \
+  --init-from-camchain \
+  --max-iterations 100
+```
+
+也可以传多个 `--cam` 和多个 `--corners`,一一对应读取每个 YAML 的 `cam0`。多相机目前只支持单次 joint 优化;`--staged` + 多相机会被拒绝。`--init-from-kalibr` 可以和 `--init-from-camchain` 组合使用:Kalibr result 提供 gravity 和扩展 IMU intrinsic 初值,camchain 提供每个 camera 的 `T_cam_imu` 和 `timeshift_cam_imu` 初值。输出 result YAML 会包含 `camera_chain` 中每个 camera 的 `T_c_b/time_shift_s`。
+
 ## IMU 扩展模型
 
 默认 `--imu-model calibrated` 对应 Kalibr 的普通 `IccImu`：gyro prediction 是 `R_i_b * omega_b + bias`，accelerometer prediction 是 `R_i_b * (h_b + lever) + bias`，两条 residual 都使用解析 `SizedCostFunction`。

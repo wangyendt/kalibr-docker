@@ -14,8 +14,13 @@ struct CamchainImuPrior {
 };
 
 CameraIntrinsics readCameraIntrinsics(const std::string& yaml_path);
+CameraIntrinsics readCameraIntrinsics(const std::string& yaml_path,
+                                      int camera_index);
 ImuNoise readImuNoise(const std::string& yaml_path);
 AprilGridConfig readAprilGridConfig(const std::string& yaml_path);
 CamchainImuPrior readCamchainImuPrior(const std::string& yaml_path);
+CamchainImuPrior readCamchainImuPrior(const std::string& yaml_path,
+                                      int camera_index);
+int readCameraCount(const std::string& yaml_path);
 
 }  // namespace ceres_cam_imu

@@ -375,6 +375,30 @@ initializeCalibrationState(const std::vector<ImageObservation> &images,
   return state;
 }
 
+CalibrationState initializeCalibrationState(
+    const std::vector<CameraObservationDataset> &cameras,
+    const std::vector<ImuSample> &imu_samples,
+    const CalibrationOptions &options) {
+  if (cameras.empty()) {
+    throw std::runtime_error("at least one camera dataset is required");
+  }
+  std::vector<ImageObservation> all_images;
+  for (const CameraObservationDataset &camera : cameras) {
+    all_images.insert(all_images.end(), camera.images.begin(),
+                      camera.images.end());
+  }
+  CalibrationState state =
+      initializeCalibrationState(all_images, imu_samples, options);
+  state.camera_extrinsics.resize(cameras.size());
+  state.camera_time_shifts.resize(cameras.size());
+  state.camera_extrinsics[0] = state.T_c_b;
+  state.camera_time_shifts[0] = state.camera_time_shift_s;
+  for (std::size_t i = 1; i < cameras.size(); ++i) {
+    state.camera_time_shifts[i].value = options.initial_camera_time_shift_s;
+  }
+  return state;
+}
+
 CalibrationBuildSummary
 buildCalibrationProblem(const CameraIntrinsics &intrinsics,
                         const ImuNoise &imu_noise,
@@ -700,6 +724,97 @@ buildCalibrationProblem(const CameraIntrinsics &intrinsics,
       summary.camera_residuals + summary.gyro_residuals +
       summary.accel_residuals + summary.gravity_tangent_size;
 
+  return summary;
+}
+
+CalibrationBuildSummary
+buildCalibrationProblem(const std::vector<CameraObservationDataset> &cameras,
+                        const ImuNoise &imu_noise,
+                        const std::vector<ImuSample> &imu_samples,
+                        const CalibrationOptions &options,
+                        CalibrationState *state, ceres::Problem *problem) {
+  if (cameras.empty()) {
+    throw std::invalid_argument("at least one camera dataset is required");
+  }
+  if (!state || !problem) {
+    throw std::invalid_argument("state and problem must be non-null");
+  }
+
+  CalibrationBuildSummary summary =
+      buildCalibrationProblem(cameras.front().intrinsics, imu_noise,
+                              cameras.front().images, imu_samples, options,
+                              state, problem);
+
+  if (cameras.size() == 1) {
+    return summary;
+  }
+  if (state->camera_extrinsics.size() < cameras.size()) {
+    state->camera_extrinsics.resize(cameras.size());
+  }
+  if (state->camera_time_shifts.size() < cameras.size()) {
+    state->camera_time_shifts.resize(cameras.size());
+  }
+  state->camera_extrinsics[0] = state->T_c_b;
+  state->camera_time_shifts[0] = state->camera_time_shift_s;
+
+  for (std::size_t camera_index = 1; camera_index < cameras.size();
+       ++camera_index) {
+    CameraExtrinsicBlock &T_c_b = state->camera_extrinsics[camera_index];
+    TimeShiftBlock &time_shift = state->camera_time_shifts[camera_index];
+    problem->AddParameterBlock(dataPtr(T_c_b), 6);
+    problem->AddParameterBlock(dataPtr(time_shift), 1);
+    if (options.fix_camera_extrinsic) {
+      problem->SetParameterBlockConstant(dataPtr(T_c_b));
+    }
+    if (options.fix_time_shift) {
+      problem->SetParameterBlockConstant(dataPtr(time_shift));
+    }
+    if (options.add_time_shift_prior &&
+        options.time_shift_prior_sigma_s > 0.0) {
+      problem->AddResidualBlock(
+          createTimeShiftPrior(options.time_shift_prior_s,
+                               options.time_shift_prior_sigma_s),
+          nullptr, dataPtr(time_shift));
+      ++summary.time_shift_priors;
+    }
+
+    int frame_count = 0;
+    const CameraObservationDataset &camera = cameras[camera_index];
+    for (const ImageObservation &image : camera.images) {
+      if (options.max_frames > 0 && frame_count >= options.max_frames) {
+        break;
+      }
+      ++frame_count;
+      const double query_time = image.timestamp_s + time_shift.value;
+      if (!state->pose_spline.isValidTime(query_time)) {
+        ++summary.skipped_camera_frames;
+        continue;
+      }
+      const SplineSegmentMeta6 pose_meta =
+          state->pose_spline.segmentMeta6(query_time);
+      for (const CornerMeasurement &corner : image.corners) {
+        ceres::CostFunction *cost = createCameraReprojectionResidual(
+            camera.intrinsics, corner, image.timestamp_s, pose_meta,
+            options.reprojection_sigma_px);
+        std::unique_ptr<ceres::LossFunction> loss =
+            makeLoss(options.camera_loss_type, options.camera_loss_width);
+        problem->AddResidualBlock(
+            cost, loss.release(), dataPtr(T_c_b), dataPtr(time_shift),
+            dataPtr(state->pose_controls.at(pose_meta.coeff_start + 0)),
+            dataPtr(state->pose_controls.at(pose_meta.coeff_start + 1)),
+            dataPtr(state->pose_controls.at(pose_meta.coeff_start + 2)),
+            dataPtr(state->pose_controls.at(pose_meta.coeff_start + 3)),
+            dataPtr(state->pose_controls.at(pose_meta.coeff_start + 4)),
+            dataPtr(state->pose_controls.at(pose_meta.coeff_start + 5)));
+        ++summary.camera_residuals;
+      }
+    }
+  }
+
+  fillProblemSizeSummary(*problem, &summary);
+  summary.kalibr_style_error_terms =
+      summary.camera_residuals + summary.gyro_residuals +
+      summary.accel_residuals + summary.gravity_tangent_size;
   return summary;
 }
 

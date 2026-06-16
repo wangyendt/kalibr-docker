@@ -6,6 +6,9 @@
 #include <iomanip>
 #include <stdexcept>
 
+#include "ceres_cam_imu/core/so3.h"
+#include "ceres_cam_imu/variables/imu_intrinsics.h"
+
 namespace ceres_cam_imu {
 namespace {
 
@@ -29,6 +32,24 @@ void writeMatrix4(std::ostream& os, const Mat4& value) {
     }
     os << "[";
     for (int c = 0; c < 4; ++c) {
+      if (c != 0) {
+        os << ", ";
+      }
+      os << value(r, c);
+    }
+    os << "]";
+  }
+  os << "]";
+}
+
+void writeMatrix3(std::ostream& os, const Mat3& value) {
+  os << "[";
+  for (int r = 0; r < 3; ++r) {
+    if (r != 0) {
+      os << ", ";
+    }
+    os << "[";
+    for (int c = 0; c < 3; ++c) {
       if (c != 0) {
         os << ", ";
       }
@@ -87,6 +108,51 @@ void writeCalibrationResultYaml(
   output << "time_shift_s: " << state.camera_time_shift_s.value << "\n";
   output << "gravity: ";
   writeVector3(output, gravity);
+  output << "\n";
+  if (!state.camera_extrinsics.empty()) {
+    output << "camera_chain:\n";
+    for (std::size_t camera_index = 0;
+         camera_index < state.camera_extrinsics.size(); ++camera_index) {
+      const Mat4 T_camera_body =
+          pose6ToMatrix(state.camera_extrinsics[camera_index]);
+      const double time_shift =
+          camera_index < state.camera_time_shifts.size()
+              ? state.camera_time_shifts[camera_index].value
+              : 0.0;
+      output << "  - camera_index: " << camera_index << "\n";
+      output << "    T_c_b: ";
+      writeMatrix4(output, T_camera_body);
+      output << "\n";
+      output << "    time_shift_s: " << time_shift << "\n";
+    }
+  }
+  output << "imu_intrinsics:\n";
+  output << "  accel_M: ";
+  writeMatrix3(output, lowerTriangularMatrix(state.imu_intrinsics.accel_M.data()));
+  output << "\n";
+  output << "  gyro_M: ";
+  writeMatrix3(output, lowerTriangularMatrix(state.imu_intrinsics.gyro_M.data()));
+  output << "\n";
+  output << "  gyro_accel_sensitivity: ";
+  writeMatrix3(output,
+               matrix3Block(state.imu_intrinsics.gyro_accel_sensitivity.data()));
+  output << "\n";
+  const Vec3 gyro_sensing_rotation_vector =
+      vector3Block(state.imu_intrinsics.gyro_sensing_rotation.data());
+  output << "  gyro_sensing_rotation: ";
+  writeMatrix3(output, rotationVectorToMatrix(gyro_sensing_rotation_vector));
+  output << "\n";
+  output << "  gyro_sensing_rotation_vector: ";
+  writeVector3(output, gyro_sensing_rotation_vector);
+  output << "\n";
+  output << "  accel_axis_rx_i: ";
+  writeVector3(output, vector3Block(state.imu_intrinsics.accel_axis_rx_i.data()));
+  output << "\n";
+  output << "  accel_axis_ry_i: ";
+  writeVector3(output, vector3Block(state.imu_intrinsics.accel_axis_ry_i.data()));
+  output << "\n";
+  output << "  accel_axis_rz_i: ";
+  writeVector3(output, vector3Block(state.imu_intrinsics.accel_axis_rz_i.data()));
   output << "\n";
 
   output << "pose_spline:\n";

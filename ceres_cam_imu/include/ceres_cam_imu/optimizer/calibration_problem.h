@@ -111,6 +111,8 @@ struct CalibrationState {
   ImuIntrinsicBlocks imu_intrinsics;
   GravityBlock gravity;
   TimeShiftBlock camera_time_shift_s;
+  std::vector<CameraExtrinsicBlock> camera_extrinsics;
+  std::vector<TimeShiftBlock> camera_time_shifts;
 };
 
 struct CalibrationBuildSummary {
@@ -143,8 +145,18 @@ struct PoseInitializationSummary {
   double rms_rotation_rad = 0.0;
 };
 
+struct CameraObservationDataset {
+  CameraIntrinsics intrinsics;
+  std::vector<ImageObservation> images;
+};
+
 CalibrationState
 initializeCalibrationState(const std::vector<ImageObservation> &images,
+                           const std::vector<ImuSample> &imu_samples,
+                           const CalibrationOptions &options);
+
+CalibrationState
+initializeCalibrationState(const std::vector<CameraObservationDataset> &cameras,
                            const std::vector<ImuSample> &imu_samples,
                            const CalibrationOptions &options);
 
@@ -152,6 +164,13 @@ CalibrationBuildSummary
 buildCalibrationProblem(const CameraIntrinsics &intrinsics,
                         const ImuNoise &imu_noise,
                         const std::vector<ImageObservation> &images,
+                        const std::vector<ImuSample> &imu_samples,
+                        const CalibrationOptions &options,
+                        CalibrationState *state, ceres::Problem *problem);
+
+CalibrationBuildSummary
+buildCalibrationProblem(const std::vector<CameraObservationDataset> &cameras,
+                        const ImuNoise &imu_noise,
                         const std::vector<ImuSample> &imu_samples,
                         const CalibrationOptions &options,
                         CalibrationState *state, ceres::Problem *problem);

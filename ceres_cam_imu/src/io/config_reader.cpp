@@ -1,5 +1,6 @@
 #include "ceres_cam_imu/io/config_reader.h"
 
+#include <algorithm>
 #include <fstream>
 #include <regex>
 #include <stdexcept>
@@ -28,6 +29,45 @@ std::vector<std::string> readLines(const std::string &path) {
   return lines;
 }
 
+bool isCameraHeaderLine(const std::string &line, int *camera_index) {
+  static const std::regex header_re(R"(^cam([0-9]+)[[:space:]]*:[[:space:]]*$)");
+  std::smatch match;
+  if (!std::regex_match(line, match, header_re)) {
+    return false;
+  }
+  if (camera_index) {
+    *camera_index = std::stoi(match[1].str());
+  }
+  return true;
+}
+
+std::vector<std::string> cameraSectionLines(
+    const std::vector<std::string> &lines, const int camera_index) {
+  const std::string header = "cam" + std::to_string(camera_index) + ":";
+  std::size_t begin = lines.size();
+  for (std::size_t i = 0; i < lines.size(); ++i) {
+    if (lines[i] == header) {
+      begin = i + 1;
+      break;
+    }
+  }
+  if (begin == lines.size()) {
+    if (camera_index == 0) {
+      return lines;
+    }
+    throw std::runtime_error("missing camera section in yaml: cam" +
+                             std::to_string(camera_index));
+  }
+  std::vector<std::string> section;
+  for (std::size_t i = begin; i < lines.size(); ++i) {
+    if (isCameraHeaderLine(lines[i], nullptr)) {
+      break;
+    }
+    section.push_back(lines[i]);
+  }
+  return section;
+}
+
 std::vector<double> extractNumbers(const std::string &text) {
   static const std::regex number_re(
       R"([-+]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[eE][-+]?\d+)?)");
@@ -42,7 +82,8 @@ std::vector<double> extractNumbers(const std::string &text) {
 std::string valueTextForKey(const std::vector<std::string> &lines,
                             const std::string &key) {
   const std::regex key_re("(^|[[:space:]])" + key + "[[:space:]]*:");
-  for (const std::string &line : lines) {
+  for (std::size_t line_index = 0; line_index < lines.size(); ++line_index) {
+    const std::string &line = lines[line_index];
     std::smatch match;
     if (!std::regex_search(line, match, key_re)) {
       continue;
@@ -50,7 +91,17 @@ std::string valueTextForKey(const std::vector<std::string> &lines,
     const std::size_t start = static_cast<std::size_t>(match.position());
     const std::size_t colon = line.find(':', start);
     if (colon != std::string::npos) {
-      return line.substr(colon + 1);
+      std::string value = line.substr(colon + 1);
+      if (value.find('[') != std::string::npos &&
+          value.find(']') == std::string::npos) {
+        for (std::size_t next = line_index + 1; next < lines.size(); ++next) {
+          value += " " + lines[next];
+          if (lines[next].find(']') != std::string::npos) {
+            break;
+          }
+        }
+      }
+      return value;
     }
   }
   throw std::runtime_error("missing yaml key: " + key);
@@ -149,8 +200,10 @@ std::string stringScalar(const std::vector<std::string> &lines,
 
 } // namespace
 
-CameraIntrinsics readCameraIntrinsics(const std::string &yaml_path) {
-  const std::vector<std::string> lines = readLines(yaml_path);
+CameraIntrinsics readCameraIntrinsics(const std::string &yaml_path,
+                                      const int camera_index) {
+  const std::vector<std::string> lines =
+      cameraSectionLines(readLines(yaml_path), camera_index);
 
   CameraIntrinsics intrinsics;
   intrinsics.camera_model =
@@ -233,6 +286,10 @@ CameraIntrinsics readCameraIntrinsics(const std::string &yaml_path) {
   return intrinsics;
 }
 
+CameraIntrinsics readCameraIntrinsics(const std::string &yaml_path) {
+  return readCameraIntrinsics(yaml_path, 0);
+}
+
 ImuNoise readImuNoise(const std::string &yaml_path) {
   const std::vector<std::string> lines = readLines(yaml_path);
   ImuNoise noise;
@@ -258,13 +315,31 @@ AprilGridConfig readAprilGridConfig(const std::string &yaml_path) {
 }
 
 CamchainImuPrior readCamchainImuPrior(const std::string &yaml_path) {
-  const std::vector<std::string> lines = readLines(yaml_path);
+  return readCamchainImuPrior(yaml_path, 0);
+}
+
+CamchainImuPrior readCamchainImuPrior(const std::string &yaml_path,
+                                      const int camera_index) {
+  const std::vector<std::string> lines =
+      cameraSectionLines(readLines(yaml_path), camera_index);
   CamchainImuPrior prior;
   prior.has_T_cam_imu =
       tryMatrix4AfterKey(lines, "T_cam_imu", &prior.T_cam_imu);
   prior.has_timeshift_cam_imu =
       tryNumericScalar(lines, "timeshift_cam_imu", &prior.timeshift_cam_imu_s);
   return prior;
+}
+
+int readCameraCount(const std::string &yaml_path) {
+  const std::vector<std::string> lines = readLines(yaml_path);
+  int max_index = -1;
+  for (const std::string &line : lines) {
+    int camera_index = -1;
+    if (isCameraHeaderLine(line, &camera_index)) {
+      max_index = std::max(max_index, camera_index);
+    }
+  }
+  return max_index + 1;
 }
 
 } // namespace ceres_cam_imu

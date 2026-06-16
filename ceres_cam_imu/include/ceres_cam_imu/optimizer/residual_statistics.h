@@ -51,4 +51,9 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
     const std::vector<ImuSample>& imu_samples,
     const CalibrationOptions& options, const CalibrationState& state);
 
+CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
+    const std::vector<CameraObservationDataset>& cameras,
+    const ImuNoise& imu_noise, const std::vector<ImuSample>& imu_samples,
+    const CalibrationOptions& options, const CalibrationState& state);
+
 }  // namespace ceres_cam_imu

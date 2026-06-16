@@ -315,4 +315,89 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
   return result;
 }
 
+CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
+    const std::vector<CameraObservationDataset> &cameras,
+    const ImuNoise &imu_noise,
+    const std::vector<ImuSample> &imu_samples,
+    const CalibrationOptions &options, const CalibrationState &state) {
+  if (cameras.empty()) {
+    return evaluateCalibrationResidualStatistics(
+        CameraIntrinsics(), imu_noise, std::vector<ImageObservation>(),
+        imu_samples, options, state);
+  }
+
+  CalibrationResidualStatistics result =
+      evaluateCalibrationResidualStatistics(cameras.front().intrinsics,
+                                            imu_noise, cameras.front().images,
+                                            imu_samples, options, state);
+
+  std::vector<double> reprojection_px;
+  std::vector<double> reprojection_normalized;
+  std::size_t reserve_count = 0;
+  for (const CameraObservationDataset &camera : cameras) {
+    reserve_count += countCameraMeasurements(camera.images, options);
+  }
+  reprojection_px.reserve(reserve_count);
+  reprojection_normalized.reserve(reserve_count);
+  result.skipped_camera_frames = 0;
+  result.skipped_camera_projections = 0;
+
+  const double reprojection_scale =
+      1.0 / (std::max(1e-12, options.reprojection_sigma_px) * std::sqrt(2.0));
+  for (std::size_t camera_index = 0; camera_index < cameras.size();
+       ++camera_index) {
+    const CameraObservationDataset &camera_dataset = cameras[camera_index];
+    const CameraModel camera(camera_dataset.intrinsics);
+    const CameraExtrinsicBlock *extrinsic = &state.T_c_b;
+    if (camera_index < state.camera_extrinsics.size()) {
+      extrinsic = &state.camera_extrinsics[camera_index];
+    }
+    const double time_shift =
+        camera_index < state.camera_time_shifts.size()
+            ? state.camera_time_shifts[camera_index].value
+            : state.camera_time_shift_s.value;
+    const Vec3 t_c_b = blockVec3(extrinsic->data());
+    const Vec3 r_c_b = blockVec3(extrinsic->data() + 3);
+    const Mat3 R_c_b = rotationVectorToMatrix(r_c_b);
+
+    int frame_count = 0;
+    for (const ImageObservation &image : camera_dataset.images) {
+      if (options.max_frames > 0 && frame_count >= options.max_frames) {
+        break;
+      }
+      ++frame_count;
+      const double query_time = image.timestamp_s + time_shift;
+      if (!state.pose_spline.isValidTime(query_time)) {
+        ++result.skipped_camera_frames;
+        continue;
+      }
+
+      const SplineSegmentMeta6 pose_meta =
+          state.pose_spline.segmentMeta6(query_time);
+      const Vec6 pose =
+          evalPoseBlock(pose_meta, query_time, state.pose_controls, 0);
+      const Vec3 t_w_b = pose.head<3>();
+      const Vec3 r_w_b = pose.tail<3>();
+      const Mat3 R_b_w = rotationVectorToMatrix(r_w_b).transpose();
+
+      for (const CornerMeasurement &corner : image.corners) {
+        const Vec3 p_b = R_b_w * (corner.target_point - t_w_b);
+        const Vec3 p_c = R_c_b * p_b + t_c_b;
+        Vec2 pixel;
+        if (!camera.projectWithJacobian(p_c, &pixel, nullptr)) {
+          ++result.skipped_camera_projections;
+          continue;
+        }
+        const double error_px = (corner.pixel - pixel).norm();
+        reprojection_px.push_back(error_px);
+        reprojection_normalized.push_back(reprojection_scale * error_px);
+      }
+    }
+  }
+
+  result.reprojection_px = computeStats(&reprojection_px);
+  result.reprojection_normalized = computeStats(&reprojection_normalized);
+  return result;
+}
+
 } // namespace ceres_cam_imu
