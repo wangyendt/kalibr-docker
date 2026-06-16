@@ -2,7 +2,7 @@
 
 这个目录是 Kalibr cam-IMU 优化链路的独立 C++/Ceres 重写路径。它刻意和原 catkin 包分开，方便逐层阅读、替换和验证。
 
-当前支持范围是单 camera + 单 IMU、AprilGrid，以及从 Kalibr corner pickle 导出的中立 CSV。相机模型已覆盖 Kalibr 常用组合：`pinhole` + `radtan/equidistant/fov/none`、`omni` + `radtan/none`、`eucm` 和 `ds`。IMU residual 默认使用普通 `calibrated` 模型，也可通过 CLI 切到 scale/misalignment 和 size-effect 扩展模型。多 camera chain 和多 IMU 仍属于后续范围。
+当前支持范围是单 IMU + 单/多 camera chain、AprilGrid，以及统一 CSV 中间格式。相机模型已覆盖 Kalibr 常用组合：`pinhole` + `radtan/equidistant/fov/none`、`omni` + `radtan/none`、`eucm` 和 `ds`。IMU residual 默认使用普通 `calibrated` 模型，也可通过 CLI 切到 scale/misalignment 和 size-effect 扩展模型。Kalibr pkl、ROS bag 和 EuRoC/TUM `mav0` 目录通过 `tools/prepare_ceres_inputs.py` 转换为 Ceres CSV；多 IMU 仍属于后续范围。
 
 ## 目录结构
 
@@ -18,7 +18,7 @@ include/ceres_cam_imu/
   target/        AprilGrid target 几何
   trajectory/    均匀 B-spline basis 与 pose/bias spline 元数据
   variables/     pose、bias、外参、重力和 time-shift 参数块
-tools/           Kalibr corner 导出、Docker 基线、Ceres sweep 工具
+tools/           数据格式转换、Kalibr Docker 基线、Ceres sweep 工具
 apps/            CLI 入口
 tests/           轻量数值检查
 ```
@@ -50,7 +50,37 @@ cmake --build /work/ceres_cam_imu/build -j
 /Users/wayne/Documents/work/data/cam_imu_2
 ```
 
-C++ 不直接读取 Kalibr pickle。先在 Kalibr Python 环境里导出 corner 和 target pose CSV：
+`calibrate_cam_imu` 主程序保持轻依赖,原生读取统一中间格式:
+
+| 输入 | CLI | 格式 |
+|---|---|---|
+| camera / camchain | `--cam` | Kalibr camchain YAML,支持 `cam0/cam1/...` |
+| IMU 噪声 | `--imu` | Kalibr IMU YAML |
+| 标定板 | `--target` | Kalibr aprilgrid YAML |
+| IMU 数据 | `--imu-data` | CSV: `timestamp_ns,gx,gy,gz,ax,ay,az` |
+| 角点观测 | `--corners` | CSV: `timestamp_ns,corner_id,pixel_x,pixel_y,target_x,target_y,target_z` |
+| target pose 初值 | `--corner-poses` | CSV: `timestamp_ns,T_t_c_00...T_t_c_33` |
+
+外部格式通过 `tools/prepare_ceres_inputs.py` 转成上述 CSV。转换需要 `kalibr-camera-calibration:20.04` Docker 镜像,因为 Kalibr pkl 和 ROS bag target extraction 依赖 Kalibr 的 Python/C++ 扩展类型。转换后,Ceres 标定本身不依赖 ROS。
+
+```bash
+# Kalibr corner pickle -> cam0_corners.csv / cam0_corner_poses.csv
+python3 ceres_cam_imu/tools/prepare_ceres_inputs.py \
+  --source-type pkl --corner-pkl cam0_corners.pkl --out-dir out/ceres_inputs
+
+# ROS bag -> cam*_corners.csv / cam0_corner_poses.csv / imu.csv
+python3 ceres_cam_imu/tools/prepare_ceres_inputs.py \
+  --source-type bag --bag data.bag --cams camchain.yaml --imu imu.yaml \
+  --target aprilgrid.yaml --out-dir out/ceres_inputs
+
+# EuRoC/TUM mav0 folder -> bag -> Ceres CSV
+python3 ceres_cam_imu/tools/prepare_ceres_inputs.py \
+  --source-type euroc --euroc-dir dataset-calib-imu2_512_16 \
+  --cams camchain.yaml --imu imu.yaml --target aprilgrid.yaml \
+  --out-dir out/ceres_inputs
+```
+
+也可以直接在 Kalibr Python 环境里调用底层导出脚本:
 
 ```bash
 python3 ceres_cam_imu/tools/export_kalibr_corners.py \
