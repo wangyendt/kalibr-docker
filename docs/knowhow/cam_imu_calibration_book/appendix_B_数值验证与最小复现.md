@@ -460,3 +460,26 @@ $$
 10. Motion prior 二次型。
 
 每一步都保留一个 finite-difference check。当前一步通过后，再接下一层。这样定位错误会比直接调完整优化问题快很多。
+
+## B.12 当前 Ceres 实现的检查点
+
+`ceres_cam_imu/tests/test_math.cpp` 已经把上述顺序落成一组轻量检查。它不是大规模标定回归，而是用小的、可控的状态验证 residual 和 hand Jacobian 的一致性。
+
+当前覆盖：
+
+| residual / 模块 | 检查内容 |
+|---|---|
+| camera reprojection | 对 `T_c_b`、camera time shift、6 个 pose control blocks 做中心差分，检查解析 Jacobian |
+| gyroscope | 对 IMU extrinsic、6 个 pose control blocks、6 个 gyro bias control blocks 做中心差分 |
+| accelerometer | 对 IMU lever/rotation、gravity、6 个 pose control blocks、6 个 accel bias control blocks 做中心差分 |
+| time shift prior | 检查 residual 数值和 1 维 Jacobian，并用通用差分器复核 |
+| bias motion prior | 检查常值 bias 的 residual 为零，检查二次型与数值积分一致，再检查 6 个 bias control blocks 的 Jacobian |
+| pose motion prior | 检查常值 pose 的 residual 为零，检查二阶 motion prior 与数值积分一致，再检查 6 个 pose control blocks 的 Jacobian |
+
+推荐命令：
+
+```bash
+ctest --test-dir ceres_cam_imu/build --output-on-failure
+```
+
+如果只改了 residual/Jacobian 层，这个命令应该先通过，再跑全量 `current-full` 标定回归。否则优化结果变差时，无法区分是求解策略问题还是局部 Jacobian 错误。
