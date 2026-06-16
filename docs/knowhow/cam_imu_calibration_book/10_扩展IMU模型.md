@@ -911,6 +911,62 @@ $$
 
 第 10 章所有 matrix 参数的 Jacobian 先按 full $3\times3$ 写。源码实际列数由 `MatrixBasicDv` 的 mask 决定。读优化矩阵时，如果发现列数不是 $9$，先看该 matrix design variable 的 active mask。
 
+### 10.6.1 Ceres 实现映射
+
+`ceres_cam_imu` 把本章的扩展参数放在 `variables/imu_intrinsics.*` 中，而不是塞进普通 IMU 外参块。这样可以保持三层边界清楚：
+
+1. `CameraExtrinsicBlock` 只表示 body/IMU 到 camera 的刚体外参。
+2. `GravityBlock`、pose spline 和 bias spline 仍提供第 6、7 章的运动学中间量。
+3. `ImuIntrinsicBlocks` 只表示本章新增的 scale、misalignment、gyro sensing rotation、acceleration sensitivity 和 size-effect axis offsets。
+
+当前 CLI 用 `--imu-model` 选择三种前向模型：
+
+| `--imu-model` | 前向模型 |
+|---|---|
+| `calibrated` | 第 6、7 章普通模型，对应 Kalibr `IccImu` |
+| `scale-misalignment` | 本章 10.3 和 10.4，对应 `IccScaledMisalignedImu` |
+| `scale-misalignment-size-effect` | 10.3、10.4、10.5 全部打开，对应 `IccScaledMisalignedSizeEffectImu` |
+
+矩阵参数在 Ceres 中有两个约定。$\mathbf M_{\mathrm{acc}}$ 和 $\mathbf M_g$ 用 6 维下三角块存储，展开顺序是
+
+$$
+[m_{00},m_{10},m_{11},m_{20},m_{21},m_{22}]
+\quad\longrightarrow\quad
+\begin{bmatrix}
+m_{00}&0&0\\
+m_{10}&m_{11}&0\\
+m_{20}&m_{21}&m_{22}
+\end{bmatrix}.
+$$
+
+$\mathbf A_g$ 用完整 9 维 row-major 块存储。$\mathbf R_{gi}$ 用 3 维旋转向量存储，预测时通过 $\operatorname{Exp}$ 变成旋转矩阵。Size-effect 的 $\mathbf r_x^i,\mathbf r_y^i,\mathbf r_z^i$ 是三个 3 维向量；默认固定 $\mathbf r_x^i$，只释放后两根轴，避免 size-effect gauge 过早污染普通外参平移。
+
+前向预测集中在 `residuals/imu_model.*`：
+
+$$
+\hat{\boldsymbol\omega}
+=
+\mathbf M_g\mathbf R_{gi}\mathbf R_{ib}\boldsymbol\omega_b
++
+\mathbf A_g\mathbf R_{gi}\mathbf R_{ib}\mathbf u_b
++
+\mathbf b_g,
+$$
+
+$$
+\hat{\mathbf a}
+=
+\mathbf M_{\mathrm{acc}}\mathbf R_{ib}(\mathbf h_b+\boldsymbol\ell_b)
++
+\mathbf b_a,
+$$
+
+以及 size-effect 的 axis-specific lever arm 版本。`optimizer/calibration_problem.*` 根据模型选择 residual 分支并添加对应参数块；`optimizer/residual_statistics.*` 使用同一套 prediction，保证结果文件里的统计和优化问题里的前向模型一致。
+
+需要分清当前实现状态。普通 `calibrated` gyro/accelerometer residual 和扩展 IMU residual 都已经是手写解析 `SizedCostFunction`。扩展分支接入了变量块、前向模型、problem builder、stage snapshot、统计和 sweep summary；10.3、10.4、10.5 的 Jacobian 链分别落在 `gyroscope_residual.cpp` 的 `ScaleMisalignedGyroscopeCost`、`accelerometer_residual.cpp` 的 `ScaleMisalignedAccelerometerCost` 和 `SizeEffectAccelerometerCost` 中。新增测试先把 Ceres prediction 与 Kalibr 源码公式直接展开结果比较到 `1e-12`，再用中心差分复核每个参数块 Jacobian。
+
+这组实现检查只证明模型级一致性和局部线性化正确性。全量扩展 IMU 标定还需要另一组实验：用带 `scale-misalignment` 或 `scale-misalignment-size-effect` 的 Kalibr 配置跑出 Docker 结果，再与 Ceres 同口径全量优化比较外参、time shift、IMU intrinsic 和 residual。
+
 ## 10.7 速查表
 
 ### 10.7.1 Accelerometer scale/misalignment

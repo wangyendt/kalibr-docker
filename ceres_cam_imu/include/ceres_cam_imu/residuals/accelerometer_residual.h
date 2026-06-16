@@ -7,9 +7,19 @@
 
 namespace ceres_cam_imu {
 
-ceres::CostFunction* createAccelerometerResidual(
-    const ImuSample& sample, const ImuNoise& noise,
-    const SplineSegmentMeta6& pose_segment,
-    const SplineSegmentMeta6& accel_bias_segment);
+ceres::CostFunction *
+createAccelerometerResidual(const ImuSample &sample, const ImuNoise &noise,
+                            const SplineSegmentMeta6 &pose_segment,
+                            const SplineSegmentMeta6 &accel_bias_segment);
 
-}  // namespace ceres_cam_imu
+ceres::CostFunction *createScaleMisalignedAccelerometerResidual(
+    const ImuSample &sample, const ImuNoise &noise,
+    const SplineSegmentMeta6 &pose_segment,
+    const SplineSegmentMeta6 &accel_bias_segment);
+
+ceres::CostFunction *createSizeEffectAccelerometerResidual(
+    const ImuSample &sample, const ImuNoise &noise,
+    const SplineSegmentMeta6 &pose_segment,
+    const SplineSegmentMeta6 &accel_bias_segment);
+
+} // namespace ceres_cam_imu

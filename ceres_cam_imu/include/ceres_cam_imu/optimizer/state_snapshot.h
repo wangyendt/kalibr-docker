@@ -12,6 +12,7 @@ struct CalibrationStateSnapshot {
   std::vector<BiasControlBlock> accel_bias_controls;
   CameraExtrinsicBlock T_c_b;
   ImuExtrinsicBlock imu_extrinsic;
+  ImuIntrinsicBlocks imu_intrinsics;
   GravityBlock gravity;
   TimeShiftBlock camera_time_shift_s;
 };

@@ -7,7 +7,7 @@
 
 #include <ceres/sized_cost_function.h>
 
-#include "ceres_cam_imu/camera/pinhole_radtan.h"
+#include "ceres_cam_imu/camera/camera_model.h"
 #include "ceres_cam_imu/core/so3.h"
 #include "ceres_cam_imu/trajectory/spline_eval.h"
 
@@ -147,7 +147,7 @@ class CameraReprojectionCost final
     }
   }
 
-  PinholeRadtanCamera camera_;
+  CameraModel camera_;
   CornerMeasurement corner_;
   double timestamp_s_ = 0.0;
   SplineSegmentMeta6 segment_;

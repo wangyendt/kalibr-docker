@@ -21,11 +21,22 @@ using Mat23 = Eigen::Matrix<double, 2, 3>;
 using Mat26 = Eigen::Matrix<double, 2, 6>;
 using Mat36 = Eigen::Matrix<double, 3, 6>;
 
+enum class ImuCalibrationModel {
+  kCalibrated,
+  kScaleMisalignment,
+  kScaleMisalignmentSizeEffect,
+};
+
 struct CameraIntrinsics {
+  std::vector<double> intrinsics;
+  std::vector<double> distortion_coeffs;
   double fx = 0.0;
   double fy = 0.0;
   double cx = 0.0;
   double cy = 0.0;
+  double xi = 0.0;
+  double alpha = 0.0;
+  double beta = 0.0;
   double k1 = 0.0;
   double k2 = 0.0;
   double p1 = 0.0;
@@ -102,6 +113,6 @@ struct DatasetPaths {
   std::string kalibr_result_txt;
 };
 
-inline bool hasPath(const std::string& path) { return !path.empty(); }
+inline bool hasPath(const std::string &path) { return !path.empty(); }
 
-}  // namespace ceres_cam_imu
+} // namespace ceres_cam_imu

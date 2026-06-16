@@ -433,6 +433,12 @@ def parse_summary_text(text):
         elif line.startswith("kalibr_delta:"):
             for key, value in key_values_from_line(line).items():
                 row["kalibr_delta_" + key] = value
+        elif line.startswith("imu model:"):
+            match = re.search(r"\bmodel=([A-Za-z0-9_-]+)", line)
+            if match:
+                row["imu_model"] = match.group(1)
+            for key, value in key_values_from_line(line).items():
+                row["imu_" + key] = value
         elif line.startswith("initialized from camchain:"):
             row.update(parse_camchain_init_line(line))
         elif line.startswith("estimated time shift prior:"):
@@ -602,6 +608,7 @@ def write_summary_csv(path, rows):
         "active_parameter_blocks",
         "tangent_params",
         "kalibr_style_error_terms",
+        "imu_model",
         "solver_linear_solver",
         "solver_num_threads",
         "solver_initial_trust_region_radius",

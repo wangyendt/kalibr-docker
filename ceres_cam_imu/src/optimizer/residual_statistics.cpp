@@ -7,23 +7,22 @@
 
 #include <Eigen/Core>
 
-#include "ceres_cam_imu/camera/pinhole_radtan.h"
+#include "ceres_cam_imu/camera/camera_model.h"
 #include "ceres_cam_imu/core/so3.h"
 #include "ceres_cam_imu/core/so3_jacobians.h"
+#include "ceres_cam_imu/residuals/imu_model.h"
 #include "ceres_cam_imu/trajectory/spline_eval.h"
+#include "ceres_cam_imu/variables/imu_intrinsics.h"
 
 namespace ceres_cam_imu {
 namespace {
 
-Vec3 blockVec3(const double* data) {
-  return Eigen::Map<const Vec3>(data);
-}
+Vec3 blockVec3(const double *data) { return Eigen::Map<const Vec3>(data); }
 
-Vec6 evalPoseBlock(const SplineSegmentMeta6& segment,
-                   const double timestamp_s,
-                   const std::vector<PoseControlBlock>& controls,
+Vec6 evalPoseBlock(const SplineSegmentMeta6 &segment, const double timestamp_s,
+                   const std::vector<PoseControlBlock> &controls,
                    const int derivative_order) {
-  std::array<const double*, 6> active{};
+  std::array<const double *, 6> active{};
   for (int i = 0; i < 6; ++i) {
     active[static_cast<std::size_t>(i)] =
         controls.at(static_cast<std::size_t>(segment.coeff_start + i)).data();
@@ -31,10 +30,9 @@ Vec6 evalPoseBlock(const SplineSegmentMeta6& segment,
   return evalPoseCurve6(segment, timestamp_s, active, derivative_order);
 }
 
-Vec3 evalBiasBlock(const SplineSegmentMeta6& segment,
-                   const double timestamp_s,
-                   const std::vector<BiasControlBlock>& controls) {
-  std::array<const double*, 6> active{};
+Vec3 evalBiasBlock(const SplineSegmentMeta6 &segment, const double timestamp_s,
+                   const std::vector<BiasControlBlock> &controls) {
+  std::array<const double *, 6> active{};
   for (int i = 0; i < 6; ++i) {
     active[static_cast<std::size_t>(i)] =
         controls.at(static_cast<std::size_t>(segment.coeff_start + i)).data();
@@ -42,7 +40,7 @@ Vec3 evalBiasBlock(const SplineSegmentMeta6& segment,
   return evalBiasCurve6(segment, timestamp_s, active, 0);
 }
 
-ResidualMagnitudeStats computeStats(std::vector<double>* values) {
+ResidualMagnitudeStats computeStats(std::vector<double> *values) {
   ResidualMagnitudeStats stats;
   if (!values || values->empty()) {
     return stats;
@@ -73,11 +71,11 @@ ResidualMagnitudeStats computeStats(std::vector<double>* values) {
   return stats;
 }
 
-std::size_t countCameraMeasurements(const std::vector<ImageObservation>& images,
-                                    const CalibrationOptions& options) {
+std::size_t countCameraMeasurements(const std::vector<ImageObservation> &images,
+                                    const CalibrationOptions &options) {
   std::size_t count = 0;
   int frame_count = 0;
-  for (const ImageObservation& image : images) {
+  for (const ImageObservation &image : images) {
     if (options.max_frames > 0 && frame_count >= options.max_frames) {
       break;
     }
@@ -87,8 +85,8 @@ std::size_t countCameraMeasurements(const std::vector<ImageObservation>& images,
   return count;
 }
 
-std::size_t countSelectedImuSamples(const std::vector<ImuSample>& imu_samples,
-                                    const CalibrationOptions& options) {
+std::size_t countSelectedImuSamples(const std::vector<ImuSample> &imu_samples,
+                                    const CalibrationOptions &options) {
   const int stride = std::max(1, options.imu_stride);
   std::size_t count = 0;
   for (std::size_t i = 0; i < imu_samples.size();
@@ -102,9 +100,9 @@ std::size_t countSelectedImuSamples(const std::vector<ImuSample>& imu_samples,
   return count;
 }
 
-void insertTopAccelOutlier(std::vector<ImuResidualOutlier>* outliers,
+void insertTopAccelOutlier(std::vector<ImuResidualOutlier> *outliers,
                            const int max_count,
-                           const ImuResidualOutlier& candidate) {
+                           const ImuResidualOutlier &candidate) {
   if (!outliers || max_count <= 0) {
     return;
   }
@@ -114,7 +112,7 @@ void insertTopAccelOutlier(std::vector<ImuResidualOutlier>* outliers,
   }
   auto weakest = std::min_element(
       outliers->begin(), outliers->end(),
-      [](const ImuResidualOutlier& lhs, const ImuResidualOutlier& rhs) {
+      [](const ImuResidualOutlier &lhs, const ImuResidualOutlier &rhs) {
         return lhs.accel_error_m_s2 < rhs.accel_error_m_s2;
       });
   if (weakest != outliers->end() &&
@@ -123,15 +121,24 @@ void insertTopAccelOutlier(std::vector<ImuResidualOutlier>* outliers,
   }
 }
 
-}  // namespace
+bool usesScaleMisalignment(const ImuCalibrationModel model) {
+  return model == ImuCalibrationModel::kScaleMisalignment ||
+         model == ImuCalibrationModel::kScaleMisalignmentSizeEffect;
+}
+
+bool usesSizeEffect(const ImuCalibrationModel model) {
+  return model == ImuCalibrationModel::kScaleMisalignmentSizeEffect;
+}
+
+} // namespace
 
 CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
-    const CameraIntrinsics& intrinsics, const ImuNoise& imu_noise,
-    const std::vector<ImageObservation>& images,
-    const std::vector<ImuSample>& imu_samples,
-    const CalibrationOptions& options, const CalibrationState& state) {
+    const CameraIntrinsics &intrinsics, const ImuNoise &imu_noise,
+    const std::vector<ImageObservation> &images,
+    const std::vector<ImuSample> &imu_samples,
+    const CalibrationOptions &options, const CalibrationState &state) {
   CalibrationResidualStatistics result;
-  const PinholeRadtanCamera camera(intrinsics);
+  const CameraModel camera(intrinsics);
   std::vector<double> reprojection_px;
   reprojection_px.reserve(countCameraMeasurements(images, options));
   std::vector<double> reprojection_normalized;
@@ -144,7 +151,7 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
       1.0 / (std::max(1e-12, options.reprojection_sigma_px) * std::sqrt(2.0));
 
   int frame_count = 0;
-  for (const ImageObservation& image : images) {
+  for (const ImageObservation &image : images) {
     if (options.max_frames > 0 && frame_count >= options.max_frames) {
       break;
     }
@@ -158,13 +165,13 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
 
     const SplineSegmentMeta6 pose_meta =
         state.pose_spline.segmentMeta6(query_time);
-    const Vec6 pose = evalPoseBlock(pose_meta, query_time,
-                                    state.pose_controls, 0);
+    const Vec6 pose =
+        evalPoseBlock(pose_meta, query_time, state.pose_controls, 0);
     const Vec3 t_w_b = pose.head<3>();
     const Vec3 r_w_b = pose.tail<3>();
     const Mat3 R_b_w = rotationVectorToMatrix(r_w_b).transpose();
 
-    for (const CornerMeasurement& corner : image.corners) {
+    for (const CornerMeasurement &corner : image.corners) {
       const Vec3 p_b = R_b_w * (corner.target_point - t_w_b);
       const Vec3 p_c = R_c_b * p_b + t_c_b;
       Vec2 pixel;
@@ -204,7 +211,7 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
         added_imu >= options.max_imu_residuals) {
       break;
     }
-    const ImuSample& sample = imu_samples[i];
+    const ImuSample &sample = imu_samples[i];
     if (!state.pose_spline.isValidTime(sample.timestamp_s) ||
         !state.gyro_bias_spline.isValidTime(sample.timestamp_s) ||
         !state.accel_bias_spline.isValidTime(sample.timestamp_s)) {
@@ -226,27 +233,51 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
     const Mat3 J_left = leftJacobianSO3(r_w_b);
     const Vec3 omega_b = -J_left * curve_dot.tail<3>();
     const Vec3 alpha_b = -J_left * curve_ddot.tail<3>();
+    const Vec3 h_b = R_bw * (curve_ddot.head<3>() - gravity);
+    const Vec3 angular_accel_lever = alpha_b.cross(r_b);
+    const Vec3 centripetal_lever = omega_b.cross(omega_b.cross(r_b));
+    const Vec3 lever = angular_accel_lever + centripetal_lever;
 
     const SplineSegmentMeta6 gyro_bias_meta =
         state.gyro_bias_spline.segmentMeta6(sample.timestamp_s);
-    const Vec3 gyro_bias =
-        evalBiasBlock(gyro_bias_meta, sample.timestamp_s,
-                      state.gyro_bias_controls);
-    const Vec3 gyro_predicted = R_i_b * omega_b + gyro_bias;
+    const Vec3 gyro_bias = evalBiasBlock(gyro_bias_meta, sample.timestamp_s,
+                                         state.gyro_bias_controls);
+    Vec3 gyro_predicted;
+    if (usesScaleMisalignment(options.imu_model)) {
+      const Mat3 R_gyro_i = rotationVectorToMatrix(
+          vector3Block(state.imu_intrinsics.gyro_sensing_rotation.data()));
+      gyro_predicted = predictScaleMisalignedGyroscope(
+          R_i_b, R_gyro_i,
+          lowerTriangularMatrix(state.imu_intrinsics.gyro_M.data()),
+          matrix3Block(state.imu_intrinsics.gyro_accel_sensitivity.data()),
+          omega_b, h_b + lever, gyro_bias);
+    } else {
+      gyro_predicted = predictCalibratedGyroscope(R_i_b, omega_b, gyro_bias);
+    }
     const double gyro_error = (gyro_predicted - sample.gyro_rad_s).norm();
     gyro_rad_s.push_back(gyro_error);
     gyro_normalized.push_back(gyro_scale * gyro_error);
 
     const SplineSegmentMeta6 accel_bias_meta =
         state.accel_bias_spline.segmentMeta6(sample.timestamp_s);
-    const Vec3 accel_bias =
-        evalBiasBlock(accel_bias_meta, sample.timestamp_s,
-                      state.accel_bias_controls);
-    const Vec3 h_b = R_bw * (curve_ddot.head<3>() - gravity);
-    const Vec3 angular_accel_lever = alpha_b.cross(r_b);
-    const Vec3 centripetal_lever = omega_b.cross(omega_b.cross(r_b));
-    const Vec3 lever = angular_accel_lever + centripetal_lever;
-    const Vec3 accel_predicted = R_i_b * (h_b + lever) + accel_bias;
+    const Vec3 accel_bias = evalBiasBlock(accel_bias_meta, sample.timestamp_s,
+                                          state.accel_bias_controls);
+    Vec3 accel_predicted;
+    if (usesSizeEffect(options.imu_model)) {
+      accel_predicted = predictSizeEffectAccelerometer(
+          R_i_b, lowerTriangularMatrix(state.imu_intrinsics.accel_M.data()),
+          h_b, r_b, vector3Block(state.imu_intrinsics.accel_axis_rx_i.data()),
+          vector3Block(state.imu_intrinsics.accel_axis_ry_i.data()),
+          vector3Block(state.imu_intrinsics.accel_axis_rz_i.data()), omega_b,
+          alpha_b, accel_bias);
+    } else if (usesScaleMisalignment(options.imu_model)) {
+      accel_predicted = predictScaleMisalignedAccelerometer(
+          R_i_b, lowerTriangularMatrix(state.imu_intrinsics.accel_M.data()),
+          h_b, lever, accel_bias);
+    } else {
+      accel_predicted =
+          predictCalibratedAccelerometer(R_i_b, h_b, lever, accel_bias);
+    }
     const double accel_error = (accel_predicted - sample.accel_m_s2).norm();
     accel_m_s2.push_back(accel_error);
     accel_normalized.push_back(accel_scale * accel_error);
@@ -266,8 +297,8 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
     outlier.centripetal_lever_norm = centripetal_lever.norm();
     outlier.omega_body_norm = omega_b.norm();
     outlier.alpha_body_norm = alpha_b.norm();
-    insertTopAccelOutlier(&result.top_accel_outliers,
-                          options.top_residuals, outlier);
+    insertTopAccelOutlier(&result.top_accel_outliers, options.top_residuals,
+                          outlier);
     ++added_imu;
   }
 
@@ -277,13 +308,11 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
   result.gyro_normalized = computeStats(&gyro_normalized);
   result.accel_m_s2 = computeStats(&accel_m_s2);
   result.accel_normalized = computeStats(&accel_normalized);
-  std::sort(result.top_accel_outliers.begin(),
-            result.top_accel_outliers.end(),
-            [](const ImuResidualOutlier& lhs,
-               const ImuResidualOutlier& rhs) {
+  std::sort(result.top_accel_outliers.begin(), result.top_accel_outliers.end(),
+            [](const ImuResidualOutlier &lhs, const ImuResidualOutlier &rhs) {
               return lhs.accel_error_m_s2 > rhs.accel_error_m_s2;
             });
   return result;
 }
 
-}  // namespace ceres_cam_imu
+} // namespace ceres_cam_imu

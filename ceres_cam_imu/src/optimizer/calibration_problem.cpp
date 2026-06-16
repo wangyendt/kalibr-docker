@@ -113,6 +113,60 @@ double rotationDeltaDeg(const Mat4 &lhs, const Mat4 &rhs) {
   return std::acos(cos_angle) * 180.0 / kPi;
 }
 
+bool usesScaleMisalignment(const ImuCalibrationModel model) {
+  return model == ImuCalibrationModel::kScaleMisalignment ||
+         model == ImuCalibrationModel::kScaleMisalignmentSizeEffect;
+}
+
+bool usesSizeEffect(const ImuCalibrationModel model) {
+  return model == ImuCalibrationModel::kScaleMisalignmentSizeEffect;
+}
+
+void addImuIntrinsicParameterBlocks(const CalibrationOptions &options,
+                                    CalibrationState *state,
+                                    ceres::Problem *problem) {
+  if (!usesScaleMisalignment(options.imu_model)) {
+    return;
+  }
+  problem->AddParameterBlock(dataPtr(state->imu_intrinsics.accel_M),
+                             LowerTriangularMatrixBlock::kSize);
+  problem->AddParameterBlock(dataPtr(state->imu_intrinsics.gyro_M),
+                             LowerTriangularMatrixBlock::kSize);
+  problem->AddParameterBlock(
+      dataPtr(state->imu_intrinsics.gyro_accel_sensitivity),
+      Matrix3Block::kSize);
+  problem->AddParameterBlock(
+      dataPtr(state->imu_intrinsics.gyro_sensing_rotation),
+      Vector3Block::kSize);
+  if (options.fix_imu_intrinsics) {
+    problem->SetParameterBlockConstant(dataPtr(state->imu_intrinsics.accel_M));
+    problem->SetParameterBlockConstant(dataPtr(state->imu_intrinsics.gyro_M));
+    problem->SetParameterBlockConstant(
+        dataPtr(state->imu_intrinsics.gyro_accel_sensitivity));
+    problem->SetParameterBlockConstant(
+        dataPtr(state->imu_intrinsics.gyro_sensing_rotation));
+  }
+  if (!usesSizeEffect(options.imu_model)) {
+    return;
+  }
+  problem->AddParameterBlock(dataPtr(state->imu_intrinsics.accel_axis_rx_i),
+                             Vector3Block::kSize);
+  problem->AddParameterBlock(dataPtr(state->imu_intrinsics.accel_axis_ry_i),
+                             Vector3Block::kSize);
+  problem->AddParameterBlock(dataPtr(state->imu_intrinsics.accel_axis_rz_i),
+                             Vector3Block::kSize);
+  if (options.fix_imu_intrinsics || options.fix_accel_size_effect_rx) {
+    problem->SetParameterBlockConstant(
+        dataPtr(state->imu_intrinsics.accel_axis_rx_i));
+  }
+  if (options.fix_imu_intrinsics) {
+    problem->SetParameterBlockConstant(
+        dataPtr(state->imu_intrinsics.accel_axis_ry_i));
+    problem->SetParameterBlockConstant(
+        dataPtr(state->imu_intrinsics.accel_axis_rz_i));
+  }
+}
+
 class StateTraceCallback final : public ceres::IterationCallback {
 public:
   StateTraceCallback(const CalibrationOptions &options,
@@ -340,6 +394,7 @@ buildCalibrationProblem(const CameraIntrinsics &intrinsics,
   problem->AddParameterBlock(dataPtr(state->camera_time_shift_s), 1);
   problem->AddParameterBlock(dataPtr(state->imu_extrinsic), 6);
   problem->AddParameterBlock(dataPtr(state->gravity), 3);
+  addImuIntrinsicParameterBlocks(options, state, problem);
   if (!options.estimate_gravity_length) {
     const Vec3 gravity(state->gravity.values[0], state->gravity.values[1],
                        state->gravity.values[2]);
@@ -450,43 +505,127 @@ buildCalibrationProblem(const CameraIntrinsics &intrinsics,
 
     std::unique_ptr<ceres::LossFunction> gyro_loss =
         makeLoss(options.gyro_loss_type, options.gyro_loss_width);
-    problem->AddResidualBlock(
-        createGyroscopeResidual(sample, imu_noise, pose_meta, gyro_bias_meta),
-        gyro_loss.release(), dataPtr(state->imu_extrinsic),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 0)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 1)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 2)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 3)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 4)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 5)),
-        dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 0)),
-        dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 1)),
-        dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 2)),
-        dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 3)),
-        dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 4)),
-        dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 5)));
+    if (usesScaleMisalignment(options.imu_model)) {
+      problem->AddResidualBlock(
+          createScaleMisalignedGyroscopeResidual(sample, imu_noise, pose_meta,
+                                                 gyro_bias_meta),
+          gyro_loss.release(), dataPtr(state->imu_extrinsic),
+          dataPtr(state->gravity),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 0)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 1)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 2)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 3)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 4)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 5)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 0)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 1)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 2)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 3)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 4)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 5)),
+          dataPtr(state->imu_intrinsics.gyro_sensing_rotation),
+          dataPtr(state->imu_intrinsics.gyro_M),
+          dataPtr(state->imu_intrinsics.gyro_accel_sensitivity));
+    } else {
+      problem->AddResidualBlock(
+          createGyroscopeResidual(sample, imu_noise, pose_meta, gyro_bias_meta),
+          gyro_loss.release(), dataPtr(state->imu_extrinsic),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 0)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 1)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 2)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 3)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 4)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 5)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 0)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 1)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 2)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 3)),
+          dataPtr(state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 4)),
+          dataPtr(
+              state->gyro_bias_controls.at(gyro_bias_meta.coeff_start + 5)));
+    }
     ++summary.gyro_residuals;
 
     std::unique_ptr<ceres::LossFunction> accel_loss =
         makeLoss(options.accel_loss_type, options.accel_loss_width);
-    problem->AddResidualBlock(
-        createAccelerometerResidual(sample, imu_noise, pose_meta,
-                                    accel_bias_meta),
-        accel_loss.release(), dataPtr(state->imu_extrinsic),
-        dataPtr(state->gravity),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 0)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 1)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 2)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 3)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 4)),
-        dataPtr(state->pose_controls.at(pose_meta.coeff_start + 5)),
-        dataPtr(state->accel_bias_controls.at(accel_bias_meta.coeff_start + 0)),
-        dataPtr(state->accel_bias_controls.at(accel_bias_meta.coeff_start + 1)),
-        dataPtr(state->accel_bias_controls.at(accel_bias_meta.coeff_start + 2)),
-        dataPtr(state->accel_bias_controls.at(accel_bias_meta.coeff_start + 3)),
-        dataPtr(state->accel_bias_controls.at(accel_bias_meta.coeff_start + 4)),
-        dataPtr(
-            state->accel_bias_controls.at(accel_bias_meta.coeff_start + 5)));
+    if (usesSizeEffect(options.imu_model)) {
+      problem->AddResidualBlock(
+          createSizeEffectAccelerometerResidual(sample, imu_noise, pose_meta,
+                                                accel_bias_meta),
+          accel_loss.release(), dataPtr(state->imu_extrinsic),
+          dataPtr(state->gravity),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 0)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 1)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 2)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 3)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 4)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 5)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 0)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 1)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 2)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 3)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 4)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 5)),
+          dataPtr(state->imu_intrinsics.accel_M),
+          dataPtr(state->imu_intrinsics.accel_axis_rx_i),
+          dataPtr(state->imu_intrinsics.accel_axis_ry_i),
+          dataPtr(state->imu_intrinsics.accel_axis_rz_i));
+    } else if (usesScaleMisalignment(options.imu_model)) {
+      problem->AddResidualBlock(
+          createScaleMisalignedAccelerometerResidual(
+              sample, imu_noise, pose_meta, accel_bias_meta),
+          accel_loss.release(), dataPtr(state->imu_extrinsic),
+          dataPtr(state->gravity),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 0)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 1)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 2)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 3)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 4)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 5)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 0)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 1)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 2)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 3)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 4)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 5)),
+          dataPtr(state->imu_intrinsics.accel_M));
+    } else {
+      problem->AddResidualBlock(
+          createAccelerometerResidual(sample, imu_noise, pose_meta,
+                                      accel_bias_meta),
+          accel_loss.release(), dataPtr(state->imu_extrinsic),
+          dataPtr(state->gravity),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 0)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 1)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 2)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 3)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 4)),
+          dataPtr(state->pose_controls.at(pose_meta.coeff_start + 5)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 0)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 1)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 2)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 3)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 4)),
+          dataPtr(
+              state->accel_bias_controls.at(accel_bias_meta.coeff_start + 5)));
+    }
     ++summary.accel_residuals;
     ++added_imu;
   }

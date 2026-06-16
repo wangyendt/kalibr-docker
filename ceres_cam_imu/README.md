@@ -2,13 +2,13 @@
 
 这个目录是 Kalibr cam-IMU 优化链路的独立 C++/Ceres 重写路径。它刻意和原 catkin 包分开，方便逐层阅读、替换和验证。
 
-当前支持范围是单 camera + 单 IMU、`pinhole` + `radtan`、AprilGrid，以及从 Kalibr corner pickle 导出的中立 CSV。多 camera chain、多 IMU 和扩展 IMU 模型仍属于后续范围。
+当前支持范围是单 camera + 单 IMU、AprilGrid，以及从 Kalibr corner pickle 导出的中立 CSV。相机模型已覆盖 Kalibr 常用组合：`pinhole` + `radtan/equidistant/fov/none`、`omni` + `radtan/none`、`eucm` 和 `ds`。IMU residual 默认使用普通 `calibrated` 模型，也可通过 CLI 切到 scale/misalignment 和 size-effect 扩展模型。多 camera chain 和多 IMU 仍属于后续范围。
 
 ## 目录结构
 
 ```text
 include/ceres_cam_imu/
-  camera/        pinhole+radtan 投影
+  camera/        Kalibr 相机投影/畸变模型
   core/          公共类型、SO(3)、SE(3) 工具
   initialization/pose spline 拟合与 time-shift prior 估计
   io/            yaml/csv/result 读写
@@ -114,6 +114,49 @@ ceres_cam_imu/build/calibrate_cam_imu \
 ```
 
 当前 Ceres dry-run 可对齐 Kalibr 的数量级：`camera=647266`，`gyro=22929`，`accel=22929`，`gyro_priors=2435`，`accel_priors=2435`，`parameter_blocks=9758`，`tangent_params=43893`，`kalibr_style_error_terms=693126`。这个结果证明 problem 组装规模对齐，不等价于最终收敛完全一致。
+
+## 相机模型
+
+`io/config_reader.cpp` 会按 Kalibr camchain YAML 读取 `camera_model`、`distortion_model`、`intrinsics` 和 `distortion_coeffs`，再交给 `camera/CameraModel` 做统一投影。当前支持的组合是：
+
+| camera_model | distortion_model | 内参顺序 |
+|---|---|---|
+| `pinhole` | `radtan` / `equidistant` / `fov` / `none` | `[fu, fv, cu, cv]` |
+| `omni` | `radtan` / `none` | `[xi, fu, fv, cu, cv]` |
+| `eucm` | `none` | `[alpha, beta, fu, fv, cu, cv]` |
+| `ds` / `double-sphere` | `none` | `[xi, alpha, fu, fv, cu, cv]` |
+
+`equi` 会归一化为 `equidistant`，空畸变会按 `none` 处理。`check_dataset` 会打印实际读取到的模型，例如：
+
+```text
+camera: 640x400 model=pinhole distortion=radtan fx=...
+```
+
+当前相机内参仍作为固定配置参与投影，不作为 Ceres 参数块优化；优化变量仍是 camera-to-IMU 外参、time shift、pose spline、bias spline、gravity 和可选 IMU intrinsics。`tests/test_math.cpp` 对上表所有投影组合的 `projectWithJacobian()` 做中心差分验证。
+
+## IMU 扩展模型
+
+默认 `--imu-model calibrated` 对应 Kalibr 的普通 `IccImu`：gyro prediction 是 `R_i_b * omega_b + bias`，accelerometer prediction 是 `R_i_b * (h_b + lever) + bias`，两条 residual 都使用解析 `SizedCostFunction`。
+
+可选模型：
+
+| CLI | Kalibr 对应 | 新增参数块 |
+|---|---|---|
+| `--imu-model scale-misalignment` | `IccScaledMisalignedImu` | accelerometer lower-triangular `M_accel`、gyro lower-triangular `M_gyro`、gyro sensing rotation `R_gyro_i`、gyro acceleration sensitivity `A_g` |
+| `--imu-model scale-misalignment-size-effect` | `IccScaledMisalignedSizeEffectImu` | 上一行全部参数，再加 accelerometer 三轴 sensing-axis offset `rx_i/ry_i/rz_i` |
+
+`--fix-imu-intrinsics` 会把这些 IMU intrinsic 参数块全部固定，只保留扩展前向模型。size-effect 模型默认固定 `rx_i`，只释放 `ry_i/rz_i`，用于沿用 Kalibr 对 size-effect gauge 的保守处理。
+
+实现入口是：
+
+```text
+include/ceres_cam_imu/variables/imu_intrinsics.h
+include/ceres_cam_imu/residuals/imu_model.h
+src/residuals/gyroscope_residual.cpp
+src/residuals/accelerometer_residual.cpp
+```
+
+扩展模型已经接入 problem builder、residual statistics、stage state snapshot 和 sweep summary。默认 `calibrated` 路径仍是多数据集性能回归基线；新增 scale/misalignment 和 size-effect residual 使用同一套模块化前向模型和手写解析 `SizedCostFunction`。`tests/test_math.cpp` 会先检查这些前向模型与 Kalibr 源码公式等价，再用中心差分复核扩展 IMU 的每个参数块 Jacobian。
 
 ## Time Shift 初值
 
@@ -292,24 +335,24 @@ ceres_cam_imu/build/calibrate_cam_imu \
 stage state [stage_name]: decision=accepted restored=0 initial_cost=... final_cost=... cost_change=... usable=1
 ```
 
-这里的快照只包含 pose controls、gyro/accel bias controls、camera/IMU extrinsic、gravity 和 time shift，不复制 spline 元数据。这样做的目的是把“参数更新是否可信”和“轨迹结构如何初始化”分开，后续如果某个 stage 因病态线性化失败，不会把坏状态带入下一阶段。
+这里的快照只包含 pose controls、gyro/accel bias controls、camera/IMU extrinsic、gravity、time shift 和可选 IMU intrinsics，不复制 spline 元数据。这样做的目的是把“参数更新是否可信”和“轨迹结构如何初始化”分开，后续如果某个 stage 因病态线性化失败，不会把坏状态带入下一阶段。
 
 ## Residual 与状态
 
-camera、gyroscope 和 accelerometer residual 都是解析 `SizedCostFunction`。覆盖关系如下：
+camera、gyroscope、accelerometer 以及扩展 IMU residual 都是解析 `SizedCostFunction`。覆盖关系如下：
 
 | residual | 参数块 |
 |---|---|
 | camera | `T_c_b`、camera time shift、6 个 pose spline control blocks |
-| gyroscope | IMU extrinsic rotation、pose controls、gyro bias controls |
-| accelerometer | lever arm、IMU extrinsic rotation、gravity、pose controls、accel bias controls |
+| gyroscope | IMU extrinsic rotation、pose controls、gyro bias controls；扩展模型另含 `R_gyro_i`、`M_gyro`、`A_g` |
+| accelerometer | lever arm、IMU extrinsic rotation、gravity、pose controls、accel bias controls；扩展模型另含 `M_accel` 和 size-effect axis offsets |
 | bias motion prior | 6 个 bias control blocks |
 | pose motion prior | 6 个 pose control blocks |
 | time shift prior | camera time-shift scalar |
 
 重力默认使用 Kalibr 风格固定范数方向约束：Ceres `SphereManifold<3>` 让三维 gravity block 的 tangent dimension 为 `2`。`--estimate-gravity-length` 会切回无约束三维向量。
 
-`tests/test_math.cpp` 对主要手写 Jacobian 做中心差分验证。覆盖范围包括 camera reprojection、gyro、accelerometer、time shift prior、bias motion prior 和 pose motion prior；motion prior 还额外用数值积分检查二次型残差能量。修改 residual 或 SO(3) Jacobian 后，至少需要重新跑：
+`tests/test_math.cpp` 对主要手写 Jacobian 做中心差分验证。覆盖范围包括所有已支持相机模型的 reprojection Jacobian、普通 gyro/accelerometer、扩展 IMU 的 scale/misaligned gyro、scale/misaligned accel、size-effect accel、time shift prior、bias motion prior 和 pose motion prior；motion prior 还额外用数值积分检查二次型残差能量。扩展 IMU 另有 Kalibr 源码公式等价检查和小样本 size-effect smoke。修改 residual 或 SO(3) Jacobian 后，至少需要重新跑：
 
 ```bash
 ctest --test-dir ceres_cam_imu/build --output-on-failure

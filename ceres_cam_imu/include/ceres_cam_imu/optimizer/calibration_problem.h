@@ -11,6 +11,7 @@
 #include "ceres_cam_imu/variables/bias_control.h"
 #include "ceres_cam_imu/variables/extrinsics.h"
 #include "ceres_cam_imu/variables/gravity.h"
+#include "ceres_cam_imu/variables/imu_intrinsics.h"
 #include "ceres_cam_imu/variables/pose_control.h"
 #include "ceres_cam_imu/variables/time_shift.h"
 
@@ -59,6 +60,9 @@ struct CalibrationOptions {
   bool fix_camera_extrinsic = false;
   bool fix_time_shift = false;
   bool fix_gravity = false;
+  ImuCalibrationModel imu_model = ImuCalibrationModel::kCalibrated;
+  bool fix_imu_intrinsics = false;
+  bool fix_accel_size_effect_rx = true;
   bool estimate_gravity_length = false;
   bool fix_camera_intrinsics = true;
   double robust_loss_width = 10.0;
@@ -104,6 +108,7 @@ struct CalibrationState {
 
   CameraExtrinsicBlock T_c_b;
   ImuExtrinsicBlock imu_extrinsic;
+  ImuIntrinsicBlocks imu_intrinsics;
   GravityBlock gravity;
   TimeShiftBlock camera_time_shift_s;
 };

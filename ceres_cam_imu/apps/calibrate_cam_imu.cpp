@@ -229,6 +229,8 @@ void usage() {
          "[--time-padding S|--timeoffset-padding S] "
          "[--fix-poses] [--fix-biases] [--fix-camera-extrinsic] "
          "[--fix-time-shift] [--fix-gravity] [--estimate-gravity-length] "
+         "[--imu-model calibrated|scale-misalignment|"
+         "scale-misalignment-size-effect] [--fix-imu-intrinsics] "
          "[--estimate-time-shift-prior] "
          "[--time-shift-pose-kps K] [--time-shift-fit-lambda L] "
          "[--estimate-orientation-gravity-prior] "
@@ -301,6 +303,14 @@ void usage() {
       << "  gravity uses a Kalibr-style fixed-norm direction manifold by "
          "default; "
          "--estimate-gravity-length switches it to a 3D Euclidean vector.\n";
+  std::cout
+      << "  --imu-model selects the IMU residual family. calibrated is the "
+         "default Kalibr IccImu model; scale-misalignment adds "
+         "lower-triangular "
+         "accelerometer/gyro M matrices, gyro sensing rotation, and gyro "
+         "g-sensitivity; scale-misalignment-size-effect also adds three "
+         "accelerometer sensing-axis offsets. --fix-imu-intrinsics keeps those "
+         "extra parameter blocks constant.\n";
   std::cout << "  --pose-motion-all-segments applies pose motion "
                "regularization to the "
                "full pose spline, matching Kalibr's BSplineMotionError scope. "
@@ -728,6 +738,9 @@ int main(int argc, char **argv) {
   options.fix_camera_extrinsic = hasFlag(argc, argv, "--fix-camera-extrinsic");
   options.fix_time_shift = hasFlag(argc, argv, "--fix-time-shift");
   options.fix_gravity = hasFlag(argc, argv, "--fix-gravity");
+  options.imu_model = ceres_cam_imu::parseImuCalibrationModel(
+      argValue(argc, argv, "--imu-model", "calibrated"));
+  options.fix_imu_intrinsics = hasFlag(argc, argv, "--fix-imu-intrinsics");
   options.estimate_gravity_length =
       hasFlag(argc, argv, "--estimate-gravity-length");
   options.camera_loss_type =
@@ -791,6 +804,11 @@ int main(int argc, char **argv) {
   }
   options.top_residuals =
       std::max(0, intArg(argc, argv, "--top-residuals", options.top_residuals));
+  std::cout << "imu model: model="
+            << ceres_cam_imu::imuCalibrationModelName(options.imu_model)
+            << " fix_imu_intrinsics=" << options.fix_imu_intrinsics
+            << " fix_accel_size_effect_rx=" << options.fix_accel_size_effect_rx
+            << "\n";
   std::vector<double> inspect_times_s;
   for (const std::string &value : argValues(argc, argv, "--inspect-time")) {
     appendDoubleList(value, &inspect_times_s);

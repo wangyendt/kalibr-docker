@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "ceres_cam_imu/camera/camera_model.h"
 #include "ceres_cam_imu/camera/pinhole_radtan.h"
 #include "ceres_cam_imu/core/se3.h"
 #include "ceres_cam_imu/core/so3.h"
@@ -28,10 +29,12 @@
 #include "ceres_cam_imu/residuals/bias_motion_prior.h"
 #include "ceres_cam_imu/residuals/camera_reprojection_residual.h"
 #include "ceres_cam_imu/residuals/gyroscope_residual.h"
+#include "ceres_cam_imu/residuals/imu_model.h"
 #include "ceres_cam_imu/residuals/pose_motion_prior.h"
 #include "ceres_cam_imu/residuals/time_shift_prior.h"
 #include "ceres_cam_imu/trajectory/spline_eval.h"
 #include "ceres_cam_imu/trajectory/uniform_bspline.h"
+#include "ceres_cam_imu/variables/imu_intrinsics.h"
 
 int main() {
   const Eigen::Vector3d r = Eigen::Vector3d::Zero();
@@ -48,6 +51,188 @@ int main() {
       camera.project(ceres_cam_imu::Vec3(0.0, 0.0, 1.0));
   assert(std::abs(px.x() - 320.0) < 1e-12);
   assert(std::abs(px.y() - 200.0) < 1e-12);
+
+  auto make_camera_intrinsics = [](const std::string &camera_model,
+                                   const std::string &distortion_model,
+                                   std::vector<double> intrinsics,
+                                   std::vector<double> distortion_coeffs) {
+    ceres_cam_imu::CameraIntrinsics model;
+    model.camera_model = camera_model;
+    model.distortion_model = distortion_model;
+    model.intrinsics = intrinsics;
+    model.distortion_coeffs = distortion_coeffs;
+    if (camera_model == "pinhole") {
+      model.fx = intrinsics[0];
+      model.fy = intrinsics[1];
+      model.cx = intrinsics[2];
+      model.cy = intrinsics[3];
+    } else if (camera_model == "omni") {
+      model.xi = intrinsics[0];
+      model.fx = intrinsics[1];
+      model.fy = intrinsics[2];
+      model.cx = intrinsics[3];
+      model.cy = intrinsics[4];
+    } else if (camera_model == "eucm") {
+      model.alpha = intrinsics[0];
+      model.beta = intrinsics[1];
+      model.fx = intrinsics[2];
+      model.fy = intrinsics[3];
+      model.cx = intrinsics[4];
+      model.cy = intrinsics[5];
+    } else if (camera_model == "ds") {
+      model.xi = intrinsics[0];
+      model.alpha = intrinsics[1];
+      model.fx = intrinsics[2];
+      model.fy = intrinsics[3];
+      model.cx = intrinsics[4];
+      model.cy = intrinsics[5];
+    }
+    if (distortion_model == "radtan" || distortion_model == "equidistant") {
+      model.k1 = distortion_coeffs[0];
+      model.k2 = distortion_coeffs[1];
+      model.p1 = distortion_coeffs[2];
+      model.p2 = distortion_coeffs[3];
+    } else if (distortion_model == "fov") {
+      model.k1 = distortion_coeffs[0];
+    }
+    model.width = 640;
+    model.height = 400;
+    return model;
+  };
+
+  auto check_camera_jacobian =
+      [](const ceres_cam_imu::CameraIntrinsics &camera_intrinsics) {
+        const ceres_cam_imu::CameraModel model(camera_intrinsics);
+        const ceres_cam_imu::Vec3 point(0.21, -0.13, 1.7);
+        ceres_cam_imu::Vec2 pixel;
+        ceres_cam_imu::Mat23 analytic;
+        assert(model.projectWithJacobian(point, &pixel, &analytic));
+        ceres_cam_imu::Mat23 numeric;
+        constexpr double eps = 1e-6;
+        for (int col = 0; col < 3; ++col) {
+          ceres_cam_imu::Vec3 plus = point;
+          ceres_cam_imu::Vec3 minus = point;
+          plus(col) += eps;
+          minus(col) -= eps;
+          ceres_cam_imu::Vec2 pixel_plus;
+          ceres_cam_imu::Vec2 pixel_minus;
+          assert(model.projectWithJacobian(plus, &pixel_plus, nullptr));
+          assert(model.projectWithJacobian(minus, &pixel_minus, nullptr));
+          numeric.col(col) = (pixel_plus - pixel_minus) / (2.0 * eps);
+        }
+        assert((analytic - numeric).norm() < 1e-4);
+      };
+
+  const ceres_cam_imu::CameraIntrinsics pinhole_radtan =
+      make_camera_intrinsics("pinhole", "radtan", {100.0, 101.0, 320.0, 200.0},
+                             {0.01, -0.001, 0.0002, -0.0003});
+  const ceres_cam_imu::CameraModel generic_pinhole_radtan(pinhole_radtan);
+  ceres_cam_imu::Vec2 generic_px;
+  assert(generic_pinhole_radtan.projectWithJacobian(
+      ceres_cam_imu::Vec3(0.0, 0.0, 1.0), &generic_px, nullptr));
+  assert(std::abs(generic_px.x() - 320.0) < 1e-12);
+  assert(std::abs(generic_px.y() - 200.0) < 1e-12);
+
+  check_camera_jacobian(pinhole_radtan);
+  check_camera_jacobian(make_camera_intrinsics(
+      "pinhole", "none", {100.0, 101.0, 320.0, 200.0}, {}));
+  check_camera_jacobian(make_camera_intrinsics(
+      "pinhole", "equidistant", {100.0, 101.0, 320.0, 200.0},
+      {0.01, -0.002, 0.0003, -0.00004}));
+  check_camera_jacobian(make_camera_intrinsics(
+      "pinhole", "fov", {100.0, 101.0, 320.0, 200.0}, {0.85}));
+  check_camera_jacobian(make_camera_intrinsics(
+      "omni", "none", {0.7, 100.0, 101.0, 320.0, 200.0}, {}));
+  check_camera_jacobian(make_camera_intrinsics(
+      "omni", "radtan", {0.7, 100.0, 101.0, 320.0, 200.0},
+      {0.01, -0.001, 0.0002, -0.0003}));
+  check_camera_jacobian(make_camera_intrinsics(
+      "eucm", "none", {0.55, 1.1, 100.0, 101.0, 320.0, 200.0}, {}));
+  check_camera_jacobian(make_camera_intrinsics(
+      "ds", "none", {-0.25, 0.55, 100.0, 101.0, 320.0, 200.0}, {}));
+  assert(ceres_cam_imu::canonicalDistortionModelName("equi") == "equidistant");
+  assert(ceres_cam_imu::parseImuCalibrationModel(
+             "scale-misalignment-size-effect") ==
+         ceres_cam_imu::ImuCalibrationModel::kScaleMisalignmentSizeEffect);
+
+  const ceres_cam_imu::Mat3 R_i_b = ceres_cam_imu::rotationVectorToMatrix(
+      ceres_cam_imu::Vec3(0.1, -0.2, 0.05));
+  const ceres_cam_imu::Vec3 omega_b(0.3, -0.1, 0.2);
+  const ceres_cam_imu::Vec3 alpha_b(0.05, 0.02, -0.04);
+  const ceres_cam_imu::Vec3 h_b(0.2, -0.3, 9.5);
+  const ceres_cam_imu::Vec3 r_b(0.01, -0.02, 0.03);
+  const ceres_cam_imu::Vec3 imu_bias(0.001, -0.002, 0.003);
+  const ceres_cam_imu::Vec3 lever =
+      ceres_cam_imu::commonLeverAcceleration(omega_b, alpha_b, r_b);
+  assert((ceres_cam_imu::predictScaleMisalignedGyroscope(
+              R_i_b, ceres_cam_imu::Mat3::Identity(),
+              ceres_cam_imu::Mat3::Identity(), ceres_cam_imu::Mat3::Zero(),
+              omega_b, h_b + lever, imu_bias) -
+          ceres_cam_imu::predictCalibratedGyroscope(R_i_b, omega_b, imu_bias))
+             .norm() < 1e-12);
+  assert((ceres_cam_imu::predictScaleMisalignedAccelerometer(
+              R_i_b, ceres_cam_imu::Mat3::Identity(), h_b, lever, imu_bias) -
+          ceres_cam_imu::predictCalibratedAccelerometer(R_i_b, h_b, lever,
+                                                        imu_bias))
+             .norm() < 1e-12);
+  assert((ceres_cam_imu::predictSizeEffectAccelerometer(
+              R_i_b, ceres_cam_imu::Mat3::Identity(), h_b, r_b,
+              ceres_cam_imu::Vec3::Zero(), ceres_cam_imu::Vec3::Zero(),
+              ceres_cam_imu::Vec3::Zero(), omega_b, alpha_b, imu_bias) -
+          ceres_cam_imu::predictCalibratedAccelerometer(R_i_b, h_b, lever,
+                                                        imu_bias))
+             .norm() < 1e-12);
+
+  ceres_cam_imu::Mat3 M_accel;
+  M_accel << 1.02, 0.0, 0.0, -0.01, 0.98, 0.0, 0.015, -0.02, 1.01;
+  ceres_cam_imu::Mat3 M_gyro;
+  M_gyro << 0.99, 0.0, 0.0, 0.02, 1.01, 0.0, -0.015, 0.01, 0.97;
+  ceres_cam_imu::Mat3 A_gyro;
+  A_gyro << 0.001, -0.002, 0.003, 0.0005, -0.001, 0.002,
+      -0.0007, 0.0009, 0.0012;
+  const ceres_cam_imu::Mat3 R_gyro_i =
+      ceres_cam_imu::rotationVectorToMatrix(ceres_cam_imu::Vec3(0.02, -0.01,
+                                                                0.015));
+  const ceres_cam_imu::Vec3 a_b = h_b + lever;
+  const ceres_cam_imu::Vec3 kalibr_scale_gyro =
+      M_gyro * (R_gyro_i * R_i_b * omega_b) +
+      A_gyro * (R_gyro_i * R_i_b * a_b) + imu_bias;
+  assert((ceres_cam_imu::predictScaleMisalignedGyroscope(
+              R_i_b, R_gyro_i, M_gyro, A_gyro, omega_b, a_b, imu_bias) -
+          kalibr_scale_gyro)
+             .norm() < 1e-12);
+  const ceres_cam_imu::Vec3 kalibr_scale_accel =
+      M_accel * (R_i_b * (h_b + lever)) + imu_bias;
+  assert((ceres_cam_imu::predictScaleMisalignedAccelerometer(
+              R_i_b, M_accel, h_b, lever, imu_bias) -
+          kalibr_scale_accel)
+             .norm() < 1e-12);
+  const ceres_cam_imu::Vec3 rx_i(0.002, -0.001, 0.0005);
+  const ceres_cam_imu::Vec3 ry_i(-0.0007, 0.0025, 0.001);
+  const ceres_cam_imu::Vec3 rz_i(0.0011, -0.0004, 0.003);
+  const ceres_cam_imu::Vec3 rx_b = r_b + R_i_b.transpose() * rx_i;
+  const ceres_cam_imu::Vec3 ry_b = r_b + R_i_b.transpose() * ry_i;
+  const ceres_cam_imu::Vec3 rz_b = r_b + R_i_b.transpose() * rz_i;
+  const ceres_cam_imu::Vec3 lever_x =
+      R_i_b *
+      ceres_cam_imu::commonLeverAcceleration(omega_b, alpha_b, rx_b);
+  const ceres_cam_imu::Vec3 lever_y =
+      R_i_b *
+      ceres_cam_imu::commonLeverAcceleration(omega_b, alpha_b, ry_b);
+  const ceres_cam_imu::Vec3 lever_z =
+      R_i_b *
+      ceres_cam_imu::commonLeverAcceleration(omega_b, alpha_b, rz_b);
+  ceres_cam_imu::Vec3 kalibr_size_axis = R_i_b * h_b;
+  kalibr_size_axis.x() += lever_x.x();
+  kalibr_size_axis.y() += lever_y.y();
+  kalibr_size_axis.z() += lever_z.z();
+  const ceres_cam_imu::Vec3 kalibr_size_accel =
+      M_accel * kalibr_size_axis + imu_bias;
+  assert((ceres_cam_imu::predictSizeEffectAccelerometer(
+              R_i_b, M_accel, h_b, r_b, rx_i, ry_i, rz_i, omega_b, alpha_b,
+              imu_bias) -
+          kalibr_size_accel)
+             .norm() < 1e-12);
 
   ceres_cam_imu::UniformBSpline spline(1, 6, 0.0, 1.0, 10);
   std::vector<Eigen::VectorXd> coeffs(
@@ -190,6 +375,36 @@ int main() {
   assert(fixed_gravity_build.active_parameter_blocks == 2);
   assert(fixed_gravity_build.tangent_parameters == 7);
   assert(fixed_gravity_build.kalibr_style_error_terms == 0);
+
+  ceres_cam_imu::CalibrationOptions scale_imu_options = gravity_options;
+  scale_imu_options.imu_model =
+      ceres_cam_imu::ImuCalibrationModel::kScaleMisalignment;
+  ceres_cam_imu::CalibrationState scale_imu_state;
+  ceres::Problem scale_imu_problem;
+  const ceres_cam_imu::CalibrationBuildSummary scale_imu_build =
+      ceres_cam_imu::buildCalibrationProblem(
+          intr, ceres_cam_imu::ImuNoise{}, {}, {}, scale_imu_options,
+          &scale_imu_state, &scale_imu_problem);
+  assert(scale_imu_build.parameter_blocks == 8);
+  assert(scale_imu_build.active_parameter_blocks == 7);
+  assert(scale_imu_build.ambient_parameters == 40);
+  assert(scale_imu_build.tangent_parameters == 33);
+
+  ceres_cam_imu::CalibrationOptions size_imu_options = gravity_options;
+  size_imu_options.imu_model =
+      ceres_cam_imu::ImuCalibrationModel::kScaleMisalignmentSizeEffect;
+  ceres_cam_imu::CalibrationState size_imu_state;
+  ceres::Problem size_imu_problem;
+  const ceres_cam_imu::CalibrationBuildSummary size_imu_build =
+      ceres_cam_imu::buildCalibrationProblem(
+          intr, ceres_cam_imu::ImuNoise{}, {}, {}, size_imu_options,
+          &size_imu_state, &size_imu_problem);
+  assert(size_imu_build.parameter_blocks == 11);
+  assert(size_imu_build.active_parameter_blocks == 9);
+  assert(size_imu_build.ambient_parameters == 49);
+  assert(size_imu_build.tangent_parameters == 39);
+  assert(size_imu_problem.IsParameterBlockConstant(
+      size_imu_state.imu_intrinsics.accel_axis_rx_i.data()));
 
   ceres_cam_imu::CalibrationState fit_state;
   fit_state.pose_spline = ceres_cam_imu::UniformBSpline(6, 6, 0.0, 1.0, 8);
@@ -371,6 +586,17 @@ int main() {
   ceres_cam_imu::CalibrationState snapshot_state = bias_init_state;
   snapshot_state.T_c_b.values = {1.0, 2.0, 3.0, 0.1, -0.2, 0.3};
   snapshot_state.imu_extrinsic.values = {-1.0, -2.0, -3.0, -0.1, 0.2, -0.3};
+  snapshot_state.imu_intrinsics.accel_M.values = {1.01,  0.02, 0.99,
+                                                  -0.01, 0.03, 1.02};
+  snapshot_state.imu_intrinsics.gyro_M.values = {0.98, -0.02, 1.03,
+                                                 0.01, -0.04, 0.97};
+  snapshot_state.imu_intrinsics.gyro_accel_sensitivity.values = {
+      0.001, 0.002, 0.003, -0.001, -0.002, -0.003, 0.004, 0.005, 0.006};
+  snapshot_state.imu_intrinsics.gyro_sensing_rotation.values = {0.01, -0.02,
+                                                                0.03};
+  snapshot_state.imu_intrinsics.accel_axis_rx_i.values = {0.001, 0.0, 0.0};
+  snapshot_state.imu_intrinsics.accel_axis_ry_i.values = {0.0, 0.002, 0.0};
+  snapshot_state.imu_intrinsics.accel_axis_rz_i.values = {0.0, 0.0, 0.003};
   snapshot_state.gravity.values = {0.1, -9.7, 0.2};
   snapshot_state.camera_time_shift_s.value = -0.123;
   snapshot_state.pose_controls.front().values = {0.0, 1.0, 2.0, 3.0, 4.0, 5.0};
@@ -381,6 +607,13 @@ int main() {
 
   snapshot_state.T_c_b.values = {};
   snapshot_state.imu_extrinsic.values = {};
+  snapshot_state.imu_intrinsics.accel_M.values = {};
+  snapshot_state.imu_intrinsics.gyro_M.values = {};
+  snapshot_state.imu_intrinsics.gyro_accel_sensitivity.values = {};
+  snapshot_state.imu_intrinsics.gyro_sensing_rotation.values = {};
+  snapshot_state.imu_intrinsics.accel_axis_rx_i.values = {};
+  snapshot_state.imu_intrinsics.accel_axis_ry_i.values = {};
+  snapshot_state.imu_intrinsics.accel_axis_rz_i.values = {};
   snapshot_state.gravity.values = {0.0, -9.80655, 0.0};
   snapshot_state.camera_time_shift_s.value = 0.0;
   snapshot_state.pose_controls.front().values = {};
@@ -392,6 +625,20 @@ int main() {
   assert(snapshot_state.T_c_b.values == state_snapshot.T_c_b.values);
   assert(snapshot_state.imu_extrinsic.values ==
          state_snapshot.imu_extrinsic.values);
+  assert(snapshot_state.imu_intrinsics.accel_M.values ==
+         state_snapshot.imu_intrinsics.accel_M.values);
+  assert(snapshot_state.imu_intrinsics.gyro_M.values ==
+         state_snapshot.imu_intrinsics.gyro_M.values);
+  assert(snapshot_state.imu_intrinsics.gyro_accel_sensitivity.values ==
+         state_snapshot.imu_intrinsics.gyro_accel_sensitivity.values);
+  assert(snapshot_state.imu_intrinsics.gyro_sensing_rotation.values ==
+         state_snapshot.imu_intrinsics.gyro_sensing_rotation.values);
+  assert(snapshot_state.imu_intrinsics.accel_axis_rx_i.values ==
+         state_snapshot.imu_intrinsics.accel_axis_rx_i.values);
+  assert(snapshot_state.imu_intrinsics.accel_axis_ry_i.values ==
+         state_snapshot.imu_intrinsics.accel_axis_ry_i.values);
+  assert(snapshot_state.imu_intrinsics.accel_axis_rz_i.values ==
+         state_snapshot.imu_intrinsics.accel_axis_rz_i.values);
   assert(snapshot_state.gravity.values == state_snapshot.gravity.values);
   assert(snapshot_state.camera_time_shift_s.value ==
          state_snapshot.camera_time_shift_s.value);
@@ -981,6 +1228,25 @@ int main() {
     finite_difference_gyro_block(block, 3);
   }
 
+  std::unique_ptr<ceres::CostFunction> scale_gyro_cost(
+      ceres_cam_imu::createScaleMisalignedGyroscopeResidual(
+          gyro_sample, gyro_noise, gyro_pose_meta, gyro_bias_meta));
+  std::vector<std::vector<double>> scale_gyro_blocks;
+  scale_gyro_blocks.push_back({0.012, -0.018, 0.027, 0.035, -0.025, 0.017});
+  scale_gyro_blocks.push_back({0.08, -9.79, 0.12});
+  for (const auto &block : gyro_pose_controls) {
+    scale_gyro_blocks.push_back({block[0], block[1], block[2],
+                                 block[3], block[4], block[5]});
+  }
+  for (const auto &block : gyro_bias_controls) {
+    scale_gyro_blocks.push_back({block[0], block[1], block[2]});
+  }
+  scale_gyro_blocks.push_back({0.012, -0.009, 0.015});
+  scale_gyro_blocks.push_back({1.01, -0.015, 0.99, 0.02, -0.01, 1.02});
+  scale_gyro_blocks.push_back({0.001, -0.002, 0.003, 0.0005, -0.0015,
+                               0.0025, -0.0007, 0.0009, 0.0012});
+  check_cost_jacobians(scale_gyro_cost.get(), scale_gyro_blocks, 2e-3);
+
   ceres_cam_imu::ImuSample accel_sample;
   accel_sample.timestamp_s = gyro_time;
   accel_sample.accel_m_s2 = ceres_cam_imu::Vec3(0.2, -9.6, 0.4);
@@ -1077,6 +1343,31 @@ int main() {
   for (int block = 8; block < 14; ++block) {
     finite_difference_accel_block(block, 3);
   }
+
+  std::unique_ptr<ceres::CostFunction> scale_accel_cost(
+      ceres_cam_imu::createScaleMisalignedAccelerometerResidual(
+          accel_sample, accel_noise, gyro_pose_meta, gyro_bias_meta));
+  std::vector<std::vector<double>> scale_accel_blocks;
+  scale_accel_blocks.push_back({0.031, -0.014, 0.019, 0.034, -0.026, 0.016});
+  scale_accel_blocks.push_back({0.1, -9.81, 0.05});
+  for (const auto &block : accel_pose_controls) {
+    scale_accel_blocks.push_back({block[0], block[1], block[2],
+                                  block[3], block[4], block[5]});
+  }
+  for (const auto &block : accel_bias_controls) {
+    scale_accel_blocks.push_back({block[0], block[1], block[2]});
+  }
+  scale_accel_blocks.push_back({1.02, 0.01, 0.98, -0.015, 0.012, 1.01});
+  check_cost_jacobians(scale_accel_cost.get(), scale_accel_blocks, 2e-3);
+
+  std::unique_ptr<ceres::CostFunction> size_accel_cost(
+      ceres_cam_imu::createSizeEffectAccelerometerResidual(
+          accel_sample, accel_noise, gyro_pose_meta, gyro_bias_meta));
+  std::vector<std::vector<double>> size_accel_blocks = scale_accel_blocks;
+  size_accel_blocks.push_back({0.002, -0.001, 0.0005});
+  size_accel_blocks.push_back({-0.0007, 0.0025, 0.001});
+  size_accel_blocks.push_back({0.0011, -0.0004, 0.003});
+  check_cost_jacobians(size_accel_cost.get(), size_accel_blocks, 3e-3);
 
   ceres_cam_imu::CalibrationState writer_state;
   writer_state.pose_spline = ceres_cam_imu::UniformBSpline(6, 6, 0.0, 1.0, 4);

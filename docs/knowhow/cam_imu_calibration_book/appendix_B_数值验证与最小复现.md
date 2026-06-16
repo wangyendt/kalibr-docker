@@ -472,6 +472,7 @@ $$
 | camera reprojection | 对 `T_c_b`、camera time shift、6 个 pose control blocks 做中心差分，检查解析 Jacobian |
 | gyroscope | 对 IMU extrinsic、6 个 pose control blocks、6 个 gyro bias control blocks 做中心差分 |
 | accelerometer | 对 IMU lever/rotation、gravity、6 个 pose control blocks、6 个 accel bias control blocks 做中心差分 |
+| extended IMU | 检查 scale/misalignment 与 size-effect 前向公式等价 Kalibr 源码展开式，并对扩展 gyro/accel 的 IMU intrinsic、axis offset、pose、bias、gravity、外参参数块做中心差分 |
 | time shift prior | 检查 residual 数值和 1 维 Jacobian，并用通用差分器复核 |
 | bias motion prior | 检查常值 bias 的 residual 为零，检查二次型与数值积分一致，再检查 6 个 bias control blocks 的 Jacobian |
 | pose motion prior | 检查常值 pose 的 residual 为零，检查二阶 motion prior 与数值积分一致，再检查 6 个 pose control blocks 的 Jacobian |

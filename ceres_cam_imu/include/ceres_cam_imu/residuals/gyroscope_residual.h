@@ -7,9 +7,14 @@
 
 namespace ceres_cam_imu {
 
-ceres::CostFunction* createGyroscopeResidual(
-    const ImuSample& sample, const ImuNoise& noise,
-    const SplineSegmentMeta6& pose_segment,
-    const SplineSegmentMeta6& gyro_bias_segment);
+ceres::CostFunction *
+createGyroscopeResidual(const ImuSample &sample, const ImuNoise &noise,
+                        const SplineSegmentMeta6 &pose_segment,
+                        const SplineSegmentMeta6 &gyro_bias_segment);
 
-}  // namespace ceres_cam_imu
+ceres::CostFunction *createScaleMisalignedGyroscopeResidual(
+    const ImuSample &sample, const ImuNoise &noise,
+    const SplineSegmentMeta6 &pose_segment,
+    const SplineSegmentMeta6 &gyro_bias_segment);
+
+} // namespace ceres_cam_imu
