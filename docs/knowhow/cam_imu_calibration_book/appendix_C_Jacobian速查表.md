@@ -2,7 +2,7 @@
 
 这份附录为一个具体场景服务：你正在调试优化器——也许在对照 `JacobianContainer` 里的某个 block，也许在写附录 B 那样的 finite-difference check——需要立刻知道“这个 residual 对这个变量块的 Jacobian 应该长什么样”，而不想翻回第 4-10 章重走一遍推导。
 
-所以这里没有新的推导，只有结论和出处。每一节对应一类 residual：先用一两句话回忆这个 residual 在比较什么，然后给出 Jacobian 总表，表后标注每组结果是在哪一节推出来的。如果某行让你觉得突兀，跟着出处回正文，那里有完整的链式法则。
+所以这里没有新的推导，只有结论和出处。每一节对应一类 residual：先用一两句话回忆这个 residual 在比较什么，然后给出 Jacobian 总表，表后标注每组结果是在哪一节推出来的。如果某行让你觉得突兀，跟着出处回正文，那里有完整的链式法则。多相机 / 多 IMU 时，单个 residual 的局部公式仍然查 C.4-C.10；传感器索引、非零 block 选择和变量更新规则查 C.12。
 
 ## C.1 表里的 Jacobian 是哪一层
 
@@ -438,4 +438,50 @@ $$
 
 “零”表示该 residual 的 forward expression 不直接依赖这个变量。通过优化耦合，一个变量当然仍可能间接影响其他 residual 的最优解。
 
-最后提醒一句：这张表的每个结论都可以用附录 B 的 finite-difference 框架数值验证。如果某个 block 和你的数值对不上，先按 C.2 的第 4 步排查两类符号来源，再检查是不是把 whitened Jacobian 当成了几何 Jacobian（C.1）。
+## C.12 多相机 / 多 IMU block 选择规则
+
+第 13 章的核心结论是：多传感器不改变 C.4-C.10 的局部 Jacobian 公式，改变的是 residual index 和变量 block 归属。调试时先按 residual 的 sensor index 找私有变量，再按查询时刻找共享 spline window。
+
+### C.12.1 Residual 连接哪些 block
+
+| residual | 非零 block | 典型零 block |
+|---|---|---|
+| camera $n$ reprojection | active pose controls、camera $n$ 的 $\Delta t_n$、intrinsics、distortion、完整 $\mathbf T_{c_nb}$ 或通往 $n$ 的 camera-chain links | 其他 camera 的私有 intrinsics/time shift、所有 IMU bias、IMU 内参、IMU lever arm、gravity |
+| ordinary gyro, IMU $m$ | active pose controls、$\mathbf R_{i_mb}$、gyro bias spline $\mathbf b^g_m$、optional IMU time offset $\Delta t^i_m$ | camera 参数、其他 IMU 的 bias/内参、gravity、$\mathbf r_{b,m}$ |
+| ordinary accel, IMU $m$ | active pose controls、gravity、$\mathbf R_{i_mb}$、$\mathbf r_{b,m}$、accel bias spline $\mathbf b^a_m$、optional IMU time offset $\Delta t^i_m$ | camera 参数、gyro bias、其他 IMU 的 bias/内参 |
+| extended gyro, IMU $m$ | ordinary gyro blocks，加 $\mathbf M_{g,m}$、$\mathbf A_{g,m}$、$\mathbf R_{g_mi_m}$；若有 acceleration sensitivity 分支，则 gravity 和 $\mathbf r_{b,m}$ 也可能非零 | camera 参数、其他 IMU 的 bias/内参 |
+| extended accel, IMU $m$ | ordinary accel blocks，加 $\mathbf M_{a,m}$ 和 size-effect 相关 lever arm | camera 参数、其他 IMU 的 bias/内参 |
+| bias motion prior, IMU $m$ | IMU $m$ 自己的 gyro 或 accel bias control points | pose、camera 参数、其他 IMU bias、IMU 外参 |
+| pose motion prior | pose spline control points | camera 参数、IMU bias、IMU 内参、gravity |
+
+Camera chain 的特殊规则是：
+
+$$
+\frac{\partial\mathbf e^\pi_{n,k,\ell}}
+{\partial\boldsymbol\xi_{\mathbf T_m,K}}
+=
+\mathbf A_T\mathrm{boxTimes}(\mathbf P_m),
+\qquad
+m\le n,
+$$
+
+若 $m>n$，该 camera residual 对 $\mathbf T_m$ 的 block 为零。也就是说，camera $n$ 只连接从 body 到 camera $n$ 路径上的 link。
+
+多 IMU 的特殊规则是：reference IMU 若定义为 body frame，则 $\mathbf R_{i_0b}$ 和 $\mathbf r_{b,0}$ 通常固定。固定 block 不进入活跃变量集合；公式上能写出 Jacobian，不代表实现里要给它装配列。
+
+### C.12.2 多传感器变量更新速查
+
+| 变量 | 更新规则 |
+|---|---|
+| 共享 pose control point | 所有传感器 residual 贡献同一个增量，按 pose spline design variable 规则回写一次 |
+| gravity | 所有 accel residual 和扩展 gyro acceleration-sensitivity 分支共享同一个 $\mathbf g_w$ |
+| camera chain transform $\mathbf T_m$ | $\mathbf T_m^+=\mathbf T_m\boxplus_K\delta\boldsymbol\xi_m$ |
+| complete camera transform $\mathbf T_{c_nb}$ | $\mathbf T_{c_nb}^+=\mathbf T_{c_nb}\boxplus_K\delta\boldsymbol\xi_n$ |
+| camera time shift $\Delta t_n$ | $\Delta t_n^+=\Delta t_n+\delta\Delta t_n$ |
+| IMU rotation $\mathbf R_{i_mb}$ | $\mathbf R_{i_mb}^+=\mathrm{Exp}(-\delta\boldsymbol\phi_{m,K})\mathbf R_{i_mb}$ |
+| IMU lever arm $\mathbf r_{b,m}$ | $\mathbf r_{b,m}^+=\mathbf r_{b,m}+\delta\mathbf r_{b,m}$ |
+| IMU bias control point | 只更新对应 IMU 的 bias spline control point |
+| IMU matrices $\mathbf M_{a,m}$、$\mathbf M_{g,m}$、$\mathbf A_{g,m}$ | 按 active mask 做欧式加法 |
+| gyro sensing rotation $\mathbf R_{g_mi_m}$ | 按 rotation design variable 更新 |
+
+最后提醒一句：这张表的每个结论都可以用附录 B 的 finite-difference 框架数值验证。如果某个 block 和你的数值对不上，先按 C.2 的第 4 步排查两类符号来源，再检查是不是把 whitened Jacobian 当成了几何 Jacobian（C.1），再检查是不是把 residual 连到了错误的 sensor index（第 13 章）。

@@ -13,7 +13,7 @@
 | 地图层 | 第 0-2 章 | 符号、坐标系、状态量、观测链路是什么 |
 | 优化公共层 | 第 3 章 | 一个 residual 的 error、weight、Jacobian 如何进入 Gauss-Newton |
 | residual / Jacobian 层 | 第 4-10 章 | camera、gyro、accel、time shift、extrinsics、bias、motion prior 和 IMU 扩展模型的具体公式怎么推 |
-| 实现与验证层 | 第 11-12 章、附录 B | Kalibr expression graph 和初始化链路怎么落到 Ceres，如何用最小 Python/C++ 程序复现和做 finite-difference check |
+| 实现与验证层 | 第 11-13 章、附录 B | Kalibr expression graph、初始化链路和多传感器因子图怎么落到 Ceres，如何用最小 Python/C++ 程序复现和做 finite-difference check |
 
 第 3 章不负责推完所有具体 Jacobian。它回答的是：**一旦某个 residual 的 Jacobian 推出来，优化器如何用它构造 $H\delta\theta=b$**。具体公式从第 4 章开始逐项展开。LM conditioner、CHOLMOD / QR 等线性求解器后端细节不是第 3 章的阅读前提。
 
@@ -34,6 +34,7 @@
 | 第 10 章 | [10_扩展IMU模型.md](10_扩展IMU模型.md) | draft | 推导 scale、misalignment、size-effect、acceleration sensitivity 等扩展 IMU 参数的 Jacobian |
 | 第 11 章 | [11_表达式图与源码对应.md](11_表达式图与源码对应.md) | draft | 把第 4-10 章公式映射到 Kalibr expression graph、error term、design variable 和源码调用链 |
 | 第 12 章 | [12_Kalibr初始化迁移到Ceres.md](12_Kalibr初始化迁移到Ceres.md) | draft | 记录 time shift、pose spline、bias、orientation 和 gravity 初始化从 Kalibr 迁移到 Ceres 的状态与验证方法 |
+| 第 13 章 | [13_多相机与多IMU因子图.md](13_多相机与多IMU因子图.md) | draft | 说明多相机 / 多 IMU 场景下 residual 索引、Jacobian block 稀疏性和变量更新规则怎样变化 |
 | 附录 A | [appendix_A_SO3幂律与Rodrigues公式.md](appendix_A_SO3幂律与Rodrigues公式.md) | draft | 从 $[\boldsymbol\omega]_\times$ 的幂律推导 Rodrigues 公式，并连接第 0.10 节的 $SE(3)$ 指数映射 |
 | 附录 B | [appendix_B_数值验证与最小复现.md](appendix_B_数值验证与最小复现.md) | draft | 用 Python/C++ 最小实现验证 SO(3)/SE(3)、projection、residual、analytic Jacobian 和 finite difference |
 | 附录 C | [appendix_C_Jacobian速查表.md](appendix_C_Jacobian速查表.md) | draft | 调试与数值验证用的 Jacobian 速查：按 residual 分节列出几何 Jacobian 总表，每行标注推导出处 |
