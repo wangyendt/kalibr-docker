@@ -43,16 +43,16 @@ PRESET_DEFINITIONS = {
         "2",
         ],
     },
-    "kalibr-dry-run": {
+    "corner-dry-run": {
         "args": [
-        "--kalibr-corner-defaults",
+        "--corner-defaults",
         "--init-from-kalibr",
         "--dry-run",
         ],
     },
     "current-full": {
         "args": [
-        "--kalibr-corner-defaults",
+        "--corner-defaults",
         "--init-from-kalibr",
         "--time-shift-prior-sigma",
         "0.0001",
@@ -75,7 +75,7 @@ PRESET_DEFINITIONS = {
     },
     "independent-full": {
         "args": [
-            "--kalibr-corner-defaults",
+            "--corner-defaults",
             "--estimate-time-shift-prior",
             "--estimate-orientation-gravity-prior",
             "--pose-fit-motion-lambda",
@@ -98,7 +98,7 @@ PRESET_DEFINITIONS = {
     },
     "independent-legacy-posefit-full": {
         "args": [
-            "--kalibr-corner-defaults",
+            "--corner-defaults",
             "--estimate-time-shift-prior",
             "--estimate-orientation-gravity-prior",
             "--time-shift-prior-sigma",
@@ -118,7 +118,7 @@ PRESET_DEFINITIONS = {
     },
     "independent-final-pe-full": {
         "args": [
-            "--kalibr-corner-defaults",
+            "--corner-defaults",
             "--estimate-time-shift-prior",
             "--estimate-orientation-gravity-prior",
             "--pose-fit-motion-lambda",
@@ -143,7 +143,7 @@ PRESET_DEFINITIONS = {
     },
     "independent-capped-pe-full": {
         "args": [
-            "--kalibr-corner-defaults",
+            "--corner-defaults",
             "--estimate-time-shift-prior",
             "--estimate-orientation-gravity-prior",
             "--pose-fit-motion-lambda",
@@ -179,7 +179,7 @@ PRESET_DEFINITIONS = {
     # docs/experiment/20260616_Ceres与KalibrDocker多数据集速度精度对比.md.
     "independent-joint-full": {
         "args": [
-            "--kalibr-corner-defaults",
+            "--corner-defaults",
             "--estimate-time-shift-prior",
             "--estimate-orientation-gravity-prior",
             "--pose-fit-motion-lambda",
@@ -203,7 +203,7 @@ PRESET_DEFINITIONS = {
     "camchain-dry-run": {
         "files": {"cam": "cam0_640x400_corners-1-camchain-imucam.yaml"},
         "args": [
-            "--kalibr-corner-defaults",
+            "--corner-defaults",
             "--init-from-camchain",
             "--dry-run",
             "--max-frames",
@@ -217,7 +217,7 @@ PRESET_DEFINITIONS = {
     "camchain-full": {
         "files": {"cam": "cam0_640x400_corners-1-camchain-imucam.yaml"},
         "args": [
-            "--kalibr-corner-defaults",
+            "--corner-defaults",
             "--init-from-camchain",
             "--estimate-orientation-gravity-prior",
             "--time-shift-prior-sigma",
@@ -236,6 +236,8 @@ PRESET_DEFINITIONS = {
         ],
     },
 }
+
+PRESET_DEFINITIONS["kalibr-dry-run"] = PRESET_DEFINITIONS["corner-dry-run"]
 
 PRESETS = {name: definition["args"] for name, definition in PRESET_DEFINITIONS.items()}
 
@@ -397,7 +399,9 @@ def parse_summary_text(text):
     row = {}
     build_prefixes = ("problem built:", "stage built")
     for line in text.splitlines():
-        if line.startswith("kalibr corner defaults active:"):
+        if line.startswith("corner defaults active:") or line.startswith(
+            "kalibr corner defaults active:"
+        ):
             for key, value in key_values_from_line(line).items():
                 row["preset_" + key] = value
         elif line.startswith("solver options:"):

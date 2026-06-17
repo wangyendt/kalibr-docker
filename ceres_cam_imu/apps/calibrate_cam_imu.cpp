@@ -209,7 +209,7 @@ void usage() {
          "result.txt] "
          "[--corner-poses poses.csv] [--init-from-kalibr] [--init-from-camchain] "
          "[--init-from-result result.yaml] "
-         "[--kalibr-corner-defaults] "
+         "[--corner-defaults] "
          "[--dry-run] [--max-frames N] [--imu-stride N] "
          "[--max-imu-residuals N] [--imu-trim-edge-count N] "
          "[--max-iterations N] [--pose-kps K] [--bias-kps K] "
@@ -265,14 +265,13 @@ void usage() {
          "[--inspect-time S] [--inspect-times S[,S...]] "
          "[--inspect-window S] [--output-result result.yaml] "
          "[--export-imu-diagnostics imu.csv] [--staged]\n";
-  std::cout << "  --time-padding matches Kalibr --timeoffset-padding; splines "
-               "are padded "
-               "by 2*S on each side.\n";
+  std::cout << "  --time-padding / --timeoffset-padding pads splines by 2*S "
+               "on each side.\n";
   std::cout
-      << "  --kalibr-corner-defaults sets the main Kalibr corner-file defaults "
-         "before parsing explicit overrides: pose/bias kps 100/50, max-iter "
-         "30, "
-         "timeoffset padding 0.04, IMU edge trim 1000, and Cauchy width 10.\n";
+      << "  --corner-defaults sets the standard corner-file defaults before "
+         "parsing explicit overrides: pose/bias kps 100/50, max-iter 30, "
+         "time padding 0.04, IMU edge trim 1000, and Cauchy width 10. "
+         "--kalibr-corner-defaults is accepted as a deprecated alias.\n";
   std::cout
       << "  --pose-fit-motion-lambda adds Kalibr-style derivative-integral "
          "regularization to camera-pose spline initialization; "
@@ -770,10 +769,10 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  const bool kalibr_corner_defaults =
-      hasFlag(argc, argv, "--kalibr-corner-defaults");
+  const bool corner_defaults = hasFlag(argc, argv, "--corner-defaults") ||
+                               hasFlag(argc, argv, "--kalibr-corner-defaults");
   ceres_cam_imu::CalibrationOptions options;
-  if (kalibr_corner_defaults) {
+  if (corner_defaults) {
     options.pose_knots_per_second = 100.0;
     options.bias_knots_per_second = 50.0;
     options.time_padding_s = 0.04;
@@ -995,7 +994,7 @@ int main(int argc, char **argv) {
       argValue(argc, argv, "--export-imu-diagnostics");
   const int imu_trim_edge_count =
       std::max(0, intArg(argc, argv, "--imu-trim-edge-count",
-                         kalibr_corner_defaults ? 1000 : 0));
+                         corner_defaults ? 1000 : 0));
   const bool staged = hasFlag(argc, argv, "--staged");
   const bool stop_on_stage_failure =
       hasFlag(argc, argv, "--stop-on-stage-failure");
@@ -1556,8 +1555,8 @@ int main(int argc, char **argv) {
     std::cout << "stage time shift prior center: prior_s="
               << options.time_shift_prior_s << "\n";
   }
-  if (kalibr_corner_defaults) {
-    std::cout << "kalibr corner defaults active: pose_kps="
+  if (corner_defaults) {
+    std::cout << "corner defaults active: pose_kps="
               << options.pose_knots_per_second
               << " bias_kps=" << options.bias_knots_per_second
               << " max_iterations=" << options.max_iterations

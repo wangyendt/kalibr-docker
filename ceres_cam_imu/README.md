@@ -123,9 +123,9 @@ wrapper 会复制数据到 `ceres_cam_imu/out/kalibr_runs/<run-name>/`，用 `ka
 
 已验证的 `cam_imu_2` 零迭代基线是：`22929` 条 IMU readings，`22929 + 22929` 个 accel/gyro error terms，`9758` 个 design variables，`693126` 个 error terms，Jacobian `1432108x43893`，time shift `-0.5505243893928822 s`，原始 residual mean 为 `0.392372 px / 0.175486 rad/s / 1.06985 m/s^2`。
 
-## Kalibr 对齐开关
+## Corner Preset 与评测口径
 
-`--kalibr-corner-defaults` 是当前 corner 文件基线的便捷 preset。它会在解析显式覆盖参数前设置：
+`--corner-defaults` 是当前 corner 文件标定的标准 preset。它会在解析显式覆盖参数前设置：
 
 ```text
 pose_kps=100
@@ -136,11 +136,13 @@ imu_trim_edge_count=1000
 camera/gyro/accel Cauchy width=10
 ```
 
+历史参数 `--kalibr-corner-defaults` 仍可解析，但只作为旧脚本兼容别名。生产独立标定不需要 `--kalibr-result`；需要输出 Ceres-Kalibr delta 时，先写 `--output-result`，再用 `compare_kalibr_result --ceres-result` 离线对比。
+
 问题规模 dry-run：
 
 ```bash
 ceres_cam_imu/build/calibrate_cam_imu \
-  --kalibr-corner-defaults \
+  --corner-defaults \
   --cam /Users/wayne/Documents/work/data/cam_imu_2/cam0-camchain-640x400.yaml \
   --imu /Users/wayne/Documents/work/data/cam_imu_2/imu.yaml \
   --target /Users/wayne/Documents/work/data/cam_imu_2/aprilgrid.yaml \
@@ -234,7 +236,7 @@ t_imu = t_cam + shift
 
 ```bash
 ceres_cam_imu/build/calibrate_cam_imu \
-  --kalibr-corner-defaults \
+  --corner-defaults \
   --cam /Users/wayne/Documents/work/data/cam_imu_2/cam0-camchain-640x400.yaml \
   --imu /Users/wayne/Documents/work/data/cam_imu_2/imu.yaml \
   --target /Users/wayne/Documents/work/data/cam_imu_2/aprilgrid.yaml \
@@ -281,7 +283,7 @@ gyro_imu ~= R_i_c * omega_camera + bias
 
 ```bash
 ceres_cam_imu/build/calibrate_cam_imu \
-  --kalibr-corner-defaults \
+  --corner-defaults \
   --cam /Users/wayne/Documents/work/data/cam_imu_2/cam0-camchain-640x400.yaml \
   --imu /Users/wayne/Documents/work/data/cam_imu_2/imu.yaml \
   --target /Users/wayne/Documents/work/data/cam_imu_2/aprilgrid.yaml \
@@ -316,7 +318,7 @@ T_c_b rotation    = identity
 
 ```bash
 ceres_cam_imu/build/calibrate_cam_imu \
-  --kalibr-corner-defaults \
+  --corner-defaults \
   --cam /Users/wayne/Documents/work/data/cam_imu_2/cam0_640x400_corners-1-camchain-imucam.yaml \
   --imu /Users/wayne/Documents/work/data/cam_imu_2/imu.yaml \
   --target /Users/wayne/Documents/work/data/cam_imu_2/aprilgrid.yaml \
@@ -459,7 +461,7 @@ python3 ceres_cam_imu/tools/run_ceres_sweep.py --run-name smoke_verify
 | preset | 用途 | 说明 |
 |---|---|---|
 | `smoke-fixed` | 小样本构建冒烟 | 默认 preset，固定 pose/bias/time/gravity，用于快速确认 residual 构建和结果写入 |
-| `kalibr-dry-run` | 读取 Kalibr txt 的初始化检查 | 不优化，只检查 `--init-from-kalibr`、数据规模和初始 delta |
+| `corner-dry-run` | corner preset 初始化检查 | 不优化，只检查 `--init-from-kalibr`、数据规模和初始 delta；旧名 `kalibr-dry-run` 仍作为兼容 alias |
 | `current-full` | 当前 Ceres 对 Docker/Kalibr 的全量回归 | 复用 Kalibr txt 初值，使用当前推荐 staged optimizer 设置 |
 | `independent-full` | 不依赖 Kalibr txt 的独立初始化回归 | 使用已迁移的 time-shift、orientation/gravity、gyro-bias 和 Kalibr 风格 pose-fit 初始化 |
 | `independent-legacy-posefit-full` | 旧 pose-fit 独立初始化回归 | 不启用 `--pose-fit-motion-lambda 0.0001 --pose-fit-boundary-anchors`，用于和迁移后的 `independent-full` 对照 |
@@ -558,7 +560,7 @@ python3 ceres_cam_imu/tools/run_ceres_sweep.py \
 
 ```bash
 ceres_cam_imu/build/calibrate_cam_imu \
-  --kalibr-corner-defaults \
+  --corner-defaults \
   --cam /Users/wayne/Documents/work/data/cam_imu_2/cam0-camchain-640x400.yaml \
   --imu /Users/wayne/Documents/work/data/cam_imu_2/imu.yaml \
   --target /Users/wayne/Documents/work/data/cam_imu_2/aprilgrid.yaml \
