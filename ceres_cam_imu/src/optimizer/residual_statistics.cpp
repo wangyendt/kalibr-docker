@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <numeric>
+#include <stdexcept>
 
 #include <Eigen/Core>
 
@@ -131,6 +134,145 @@ bool usesSizeEffect(const ImuCalibrationModel model) {
 }
 
 } // namespace
+
+void writeImuDiagnosticsCsv(const std::string &output_path,
+                            const std::vector<ImuSample> &imu_samples,
+                            const CalibrationOptions &options,
+                            const CalibrationState &state) {
+  std::ofstream output(output_path);
+  if (!output.is_open()) {
+    throw std::runtime_error("failed to open IMU diagnostics output: " +
+                             output_path);
+  }
+  output << std::setprecision(12);
+  output << "timestamp_ns,"
+         << "gyro_meas_x,gyro_meas_y,gyro_meas_z,"
+         << "accel_meas_x,accel_meas_y,accel_meas_z,"
+         << "omega_b_x,omega_b_y,omega_b_z,"
+         << "alpha_b_x,alpha_b_y,alpha_b_z,"
+         << "a_w_x,a_w_y,a_w_z,"
+         << "a_b_x,a_b_y,a_b_z,"
+         << "a_i_x,a_i_y,a_i_z,"
+         << "gyro_bias_x,gyro_bias_y,gyro_bias_z,"
+         << "accel_bias_x,accel_bias_y,accel_bias_z,"
+         << "gyro_pred_x,gyro_pred_y,gyro_pred_z,"
+         << "accel_pred_x,accel_pred_y,accel_pred_z,"
+         << "gyro_res_x,gyro_res_y,gyro_res_z,"
+         << "accel_res_x,accel_res_y,accel_res_z,"
+         << "gyro_res_norm,accel_res_norm\n";
+
+  const Vec3 r_b = blockVec3(state.imu_extrinsic.data());
+  const Vec3 r_i_b = blockVec3(state.imu_extrinsic.data() + 3);
+  const Mat3 R_i_b = rotationVectorToMatrix(r_i_b);
+  const Vec3 gravity = blockVec3(state.gravity.data());
+  const bool scale_misalignment = usesScaleMisalignment(options.imu_model);
+  const bool size_effect = usesSizeEffect(options.imu_model);
+  const Mat3 R_gyro_i = rotationVectorToMatrix(
+      vector3Block(state.imu_intrinsics.gyro_sensing_rotation.data()));
+  const Mat3 M_gyro =
+      lowerTriangularMatrix(state.imu_intrinsics.gyro_M.data());
+  const Mat3 A_gyro_accel =
+      matrix3Block(state.imu_intrinsics.gyro_accel_sensitivity.data());
+  const Mat3 M_accel =
+      lowerTriangularMatrix(state.imu_intrinsics.accel_M.data());
+  const Vec3 rx_i = vector3Block(state.imu_intrinsics.accel_axis_rx_i.data());
+  const Vec3 ry_i = vector3Block(state.imu_intrinsics.accel_axis_ry_i.data());
+  const Vec3 rz_i = vector3Block(state.imu_intrinsics.accel_axis_rz_i.data());
+
+  int added_imu = 0;
+  const int stride = std::max(1, options.imu_stride);
+  for (std::size_t i = 0; i < imu_samples.size();
+       i += static_cast<std::size_t>(stride)) {
+    if (options.max_imu_residuals > 0 &&
+        added_imu >= options.max_imu_residuals) {
+      break;
+    }
+    const ImuSample &sample = imu_samples[i];
+    if (!state.pose_spline.isValidTime(sample.timestamp_s) ||
+        !state.gyro_bias_spline.isValidTime(sample.timestamp_s) ||
+        !state.accel_bias_spline.isValidTime(sample.timestamp_s)) {
+      continue;
+    }
+
+    const SplineSegmentMeta6 pose_meta =
+        state.pose_spline.segmentMeta6(sample.timestamp_s);
+    const Vec6 curve =
+        evalPoseBlock(pose_meta, sample.timestamp_s, state.pose_controls, 0);
+    const Vec6 curve_dot =
+        evalPoseBlock(pose_meta, sample.timestamp_s, state.pose_controls, 1);
+    const Vec6 curve_ddot =
+        evalPoseBlock(pose_meta, sample.timestamp_s, state.pose_controls, 2);
+
+    const Vec3 r_w_b = curve.tail<3>();
+    const Mat3 R_b_w = rotationVectorToMatrix(r_w_b).transpose();
+    const Mat3 J_left = leftJacobianSO3(r_w_b);
+    const Vec3 omega_b = -J_left * curve_dot.tail<3>();
+    const Vec3 alpha_b = -J_left * curve_ddot.tail<3>();
+    const Vec3 a_w = curve_ddot.head<3>();
+    const Vec3 h_b = R_b_w * (a_w - gravity);
+    const Vec3 lever = alpha_b.cross(r_b) + omega_b.cross(omega_b.cross(r_b));
+    const Vec3 a_b = h_b + lever;
+    const Vec3 a_i = R_i_b * a_b;
+
+    const SplineSegmentMeta6 gyro_bias_meta =
+        state.gyro_bias_spline.segmentMeta6(sample.timestamp_s);
+    const Vec3 gyro_bias = evalBiasBlock(gyro_bias_meta, sample.timestamp_s,
+                                         state.gyro_bias_controls);
+    const SplineSegmentMeta6 accel_bias_meta =
+        state.accel_bias_spline.segmentMeta6(sample.timestamp_s);
+    const Vec3 accel_bias = evalBiasBlock(accel_bias_meta, sample.timestamp_s,
+                                          state.accel_bias_controls);
+
+    const Vec3 gyro_predicted =
+        scale_misalignment
+            ? predictScaleMisalignedGyroscope(R_i_b, R_gyro_i, M_gyro,
+                                              A_gyro_accel, omega_b, a_b,
+                                              gyro_bias)
+            : predictCalibratedGyroscope(R_i_b, omega_b, gyro_bias);
+    Vec3 accel_predicted;
+    if (size_effect) {
+      accel_predicted = predictSizeEffectAccelerometer(
+          R_i_b, M_accel, h_b, r_b, rx_i, ry_i, rz_i, omega_b, alpha_b,
+          accel_bias);
+    } else if (scale_misalignment) {
+      accel_predicted =
+          predictScaleMisalignedAccelerometer(R_i_b, M_accel, h_b, lever,
+                                              accel_bias);
+    } else {
+      accel_predicted =
+          predictCalibratedAccelerometer(R_i_b, h_b, lever, accel_bias);
+    }
+
+    const Vec3 gyro_residual = sample.gyro_rad_s - gyro_predicted;
+    const Vec3 accel_residual = sample.accel_m_s2 - accel_predicted;
+    auto write_vec = [&output](const Vec3 &value) {
+      output << "," << value.x() << "," << value.y() << "," << value.z();
+    };
+    output << std::fixed << std::setprecision(0) << sample.timestamp_s * 1e9
+           << std::defaultfloat << std::setprecision(12);
+    write_vec(sample.gyro_rad_s);
+    write_vec(sample.accel_m_s2);
+    write_vec(omega_b);
+    write_vec(alpha_b);
+    write_vec(a_w);
+    write_vec(a_b);
+    write_vec(a_i);
+    write_vec(gyro_bias);
+    write_vec(accel_bias);
+    write_vec(gyro_predicted);
+    write_vec(accel_predicted);
+    write_vec(gyro_residual);
+    write_vec(accel_residual);
+    output << "," << gyro_residual.norm() << "," << accel_residual.norm()
+           << "\n";
+    ++added_imu;
+  }
+
+  if (!output.good()) {
+    throw std::runtime_error("failed to write IMU diagnostics output: " +
+                             output_path);
+  }
+}
 
 CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
     const CameraIntrinsics &intrinsics, const ImuNoise &imu_noise,

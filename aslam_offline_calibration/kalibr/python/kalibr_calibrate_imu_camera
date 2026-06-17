@@ -292,6 +292,9 @@ def main():
         posesFile = bagtag + "-poses-imucam-imu0.csv"
         util.exportPoses(iCal, filename=posesFile)
         print("  Poses written to {0}".format(posesFile))
+        imuKinematicsFile = bagtag + "-imu-kinematics-imucam-imu0.csv"
+        util.exportImuKinematics(iCal, filename=imuKinematicsFile)
+        print("  IMU kinematics written to {0}".format(imuKinematicsFile))
         print("")
     print(f'\033[33mSave everything elapsed {time.time() - ts_beginning: .3f}s\033[0m')
 

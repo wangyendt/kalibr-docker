@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "ceres_cam_imu/optimizer/calibration_problem.h"
@@ -55,5 +56,10 @@ CalibrationResidualStatistics evaluateCalibrationResidualStatistics(
     const std::vector<CameraObservationDataset>& cameras,
     const ImuNoise& imu_noise, const std::vector<ImuSample>& imu_samples,
     const CalibrationOptions& options, const CalibrationState& state);
+
+void writeImuDiagnosticsCsv(const std::string& output_path,
+                            const std::vector<ImuSample>& imu_samples,
+                            const CalibrationOptions& options,
+                            const CalibrationState& state);
 
 }  // namespace ceres_cam_imu

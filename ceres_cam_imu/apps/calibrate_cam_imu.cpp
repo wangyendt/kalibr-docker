@@ -15,6 +15,7 @@
 #include "ceres_cam_imu/core/so3.h"
 #include "ceres_cam_imu/initialization/orientation_gravity_initializer.h"
 #include "ceres_cam_imu/initialization/time_shift_initializer.h"
+#include "ceres_cam_imu/io/calibration_result_reader.h"
 #include "ceres_cam_imu/io/calibration_result_writer.h"
 #include "ceres_cam_imu/io/config_reader.h"
 #include "ceres_cam_imu/io/corner_csv_reader.h"
@@ -207,6 +208,7 @@ void usage() {
          "--imu-data data.csv --corners corners.csv [--kalibr-result "
          "result.txt] "
          "[--corner-poses poses.csv] [--init-from-kalibr] [--init-from-camchain] "
+         "[--init-from-result result.yaml] "
          "[--kalibr-corner-defaults] "
          "[--dry-run] [--max-frames N] [--imu-stride N] "
          "[--max-imu-residuals N] [--imu-trim-edge-count N] "
@@ -261,7 +263,8 @@ void usage() {
          "[--pose-motion-local-translation-scale F] "
          "[--pose-motion-local-rotation-scale F] [--top-residuals N] "
          "[--inspect-time S] [--inspect-times S[,S...]] "
-         "[--inspect-window S] [--output-result result.yaml] [--staged]\n";
+         "[--inspect-window S] [--output-result result.yaml] "
+         "[--export-imu-diagnostics imu.csv] [--staged]\n";
   std::cout << "  --time-padding matches Kalibr --timeoffset-padding; splines "
                "are padded "
                "by 2*S on each side.\n";
@@ -450,6 +453,64 @@ void initializeImuIntrinsicsFromKalibr(
               << " accel_size_effect="
               << (kalibr.has_accel_axis_rx_i && kalibr.has_accel_axis_ry_i &&
                           kalibr.has_accel_axis_rz_i
+                      ? 1
+                      : 0)
+              << "\n";
+  }
+}
+
+void initializeImuIntrinsicsFromResult(
+    const ceres_cam_imu::CalibrationResultFile &result,
+    ceres_cam_imu::CalibrationState *state) {
+  if (!state) {
+    return;
+  }
+  int initialized_blocks = 0;
+  if (result.has_accel_M) {
+    setLowerTriangularBlock(result.accel_M, &state->imu_intrinsics.accel_M);
+    ++initialized_blocks;
+  }
+  if (result.has_gyro_M) {
+    setLowerTriangularBlock(result.gyro_M, &state->imu_intrinsics.gyro_M);
+    ++initialized_blocks;
+  }
+  if (result.has_gyro_accel_sensitivity) {
+    setMatrix3Block(result.gyro_accel_sensitivity,
+                    &state->imu_intrinsics.gyro_accel_sensitivity);
+    ++initialized_blocks;
+  }
+  if (result.has_gyro_sensing_rotation) {
+    setVector3Block(
+        ceres_cam_imu::rotationMatrixToVector(result.gyro_sensing_rotation),
+        &state->imu_intrinsics.gyro_sensing_rotation);
+    ++initialized_blocks;
+  }
+  if (result.has_accel_axis_rx_i) {
+    setVector3Block(result.accel_axis_rx_i,
+                    &state->imu_intrinsics.accel_axis_rx_i);
+    ++initialized_blocks;
+  }
+  if (result.has_accel_axis_ry_i) {
+    setVector3Block(result.accel_axis_ry_i,
+                    &state->imu_intrinsics.accel_axis_ry_i);
+    ++initialized_blocks;
+  }
+  if (result.has_accel_axis_rz_i) {
+    setVector3Block(result.accel_axis_rz_i,
+                    &state->imu_intrinsics.accel_axis_rz_i);
+    ++initialized_blocks;
+  }
+  if (initialized_blocks > 0) {
+    std::cout << "initialized IMU intrinsics from Ceres result: blocks="
+              << initialized_blocks
+              << " accel_M=" << (result.has_accel_M ? 1 : 0)
+              << " gyro_M=" << (result.has_gyro_M ? 1 : 0)
+              << " gyro_A="
+              << (result.has_gyro_accel_sensitivity ? 1 : 0)
+              << " gyro_C=" << (result.has_gyro_sensing_rotation ? 1 : 0)
+              << " accel_size_effect="
+              << (result.has_accel_axis_rx_i && result.has_accel_axis_ry_i &&
+                          result.has_accel_axis_rz_i
                       ? 1
                       : 0)
               << "\n";
@@ -930,6 +991,8 @@ int main(int argc, char **argv) {
       doubleArg(argc, argv, "--inspect-window", 0.02);
   const std::string output_result_path =
       argValue(argc, argv, "--output-result");
+  const std::string imu_diagnostics_path =
+      argValue(argc, argv, "--export-imu-diagnostics");
   const int imu_trim_edge_count =
       std::max(0, intArg(argc, argv, "--imu-trim-edge-count",
                          kalibr_corner_defaults ? 1000 : 0));
@@ -1230,6 +1293,20 @@ int main(int argc, char **argv) {
   if (have_kalibr_result) {
     kalibr = ceres_cam_imu::readKalibrResult(kalibr_result_path);
   }
+  const std::string init_result_path =
+      argValue(argc, argv, "--init-from-result");
+  ceres_cam_imu::CalibrationResultFile init_result;
+  const bool init_from_result = !init_result_path.empty();
+  if (init_from_result) {
+    init_result = ceres_cam_imu::readCalibrationResultYaml(init_result_path);
+    if (multi_camera && init_result.camera_T_c_b.size() < cameras.size()) {
+      std::cerr << "--init-from-result requires a complete camera_chain for "
+                << cameras.size() << " cameras; found "
+                << init_result.camera_T_c_b.size() << " entries in "
+                << init_result_path << "\n";
+      return 2;
+    }
+  }
   if (options.trace_iteration_state && have_kalibr_result) {
     options.trace_has_reference_state = true;
     options.trace_reference_T_c_b = kalibr.T_ci;
@@ -1255,6 +1332,45 @@ int main(int argc, char **argv) {
   bool have_initial_camera_blocks = false;
   ceres_cam_imu::Vec3 initial_gravity = ceres_cam_imu::Vec3::Zero();
   bool have_initial_gravity = false;
+  if (init_from_result) {
+    options.initial_camera_time_shift_s = init_result.time_shift_s;
+    initial_camera_time_shifts[0] = init_result.time_shift_s;
+    const ceres_cam_imu::Vec6 T_c_b =
+        ceres_cam_imu::matrixToPose6(init_result.T_c_b);
+    for (int i = 0; i < 6; ++i) {
+      initial_T_c_b.values[static_cast<std::size_t>(i)] = T_c_b(i);
+    }
+    initial_camera_extrinsics[0] = initial_T_c_b;
+    for (std::size_t camera_index = 0;
+         camera_index < init_result.camera_T_c_b.size() &&
+         camera_index < initial_camera_extrinsics.size();
+         ++camera_index) {
+      const ceres_cam_imu::Vec6 camera_T_c_b =
+          ceres_cam_imu::matrixToPose6(init_result.camera_T_c_b[camera_index]);
+      for (int i = 0; i < 6; ++i) {
+        initial_camera_extrinsics[camera_index]
+            .values[static_cast<std::size_t>(i)] = camera_T_c_b(i);
+      }
+    }
+    for (std::size_t camera_index = 0;
+         camera_index < init_result.camera_time_shift_s.size() &&
+         camera_index < initial_camera_time_shifts.size();
+         ++camera_index) {
+      initial_camera_time_shifts[camera_index] =
+          init_result.camera_time_shift_s[camera_index];
+    }
+    have_initial_camera_blocks = true;
+    initial_gravity = init_result.gravity;
+    have_initial_gravity = true;
+    const std::streamsize old_precision = std::cout.precision();
+    std::cout << std::setprecision(17)
+              << "initialized from Ceres result: time_shift_s="
+              << options.initial_camera_time_shift_s
+              << " translation_m=" << initial_T_c_b.values[0] << " "
+              << initial_T_c_b.values[1] << " " << initial_T_c_b.values[2]
+              << " gravity_m_s2=" << initial_gravity.transpose() << "\n";
+    std::cout.precision(old_precision);
+  }
   if (init_from_kalibr) {
     options.initial_camera_time_shift_s = kalibr.timeshift_cam_to_imu_s;
     initial_camera_time_shifts[0] = kalibr.timeshift_cam_to_imu_s;
@@ -1479,6 +1595,9 @@ int main(int argc, char **argv) {
       state.gravity.values[static_cast<std::size_t>(i)] = initial_gravity(i);
     }
   }
+  if (init_from_result) {
+    initializeImuIntrinsicsFromResult(init_result, &state);
+  }
   if (init_from_kalibr) {
     initializeImuIntrinsicsFromKalibr(kalibr, &state);
   }
@@ -1619,6 +1738,11 @@ int main(int argc, char **argv) {
                                                 residual_stats, writer_options);
       std::cout << "wrote calibration result: " << output_result_path << "\n";
     }
+    if (!imu_diagnostics_path.empty()) {
+      ceres_cam_imu::writeImuDiagnosticsCsv(imu_diagnostics_path, imu_samples,
+                                            options, state);
+      std::cout << "wrote IMU diagnostics: " << imu_diagnostics_path << "\n";
+    }
     return all_stages_usable ? 0 : 1;
   }
 
@@ -1679,6 +1803,11 @@ int main(int argc, char **argv) {
     ceres_cam_imu::writeCalibrationResultYaml(output_result_path, state,
                                               residual_stats, writer_options);
     std::cout << "wrote calibration result: " << output_result_path << "\n";
+  }
+  if (!imu_diagnostics_path.empty()) {
+    ceres_cam_imu::writeImuDiagnosticsCsv(imu_diagnostics_path, imu_samples,
+                                          options, state);
+    std::cout << "wrote IMU diagnostics: " << imu_diagnostics_path << "\n";
   }
   return summary.IsSolutionUsable() ? 0 : 1;
 }

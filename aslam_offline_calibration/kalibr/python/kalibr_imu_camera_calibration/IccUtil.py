@@ -279,6 +279,88 @@ def exportPoses(cself, filename="poses_imu0.csv"):
         print("{:.0f},".format(1e9 * time) + ",".join(map("{:.6f}".format, position)) \
                + "," + ",".join(map("{:.6f}".format, orientation)) , file=f)
 
+def exportImuKinematics(cself, filename="imu_kinematics_imu0.csv"):
+
+    # Export the same per-sample body kinematics that the IMU residual terms use.
+    imu = cself.ImuList[0]
+    bodyspline = cself.poseDv.spline()
+    gravity = np.asarray(cself.gravityDv.toEuclidean(), dtype=float).reshape(3)
+    C_i_b = np.asarray(imu.q_i_b_Dv.toRotationMatrix(), dtype=float).reshape(3, 3)
+    r_b = np.asarray(imu.r_b_Dv.toEuclidean(), dtype=float).reshape(3)
+    C_gyro_i = np.eye(3)
+    M_accel = np.eye(3)
+    M_gyro = np.eye(3)
+    A_gyro = np.zeros((3, 3))
+    if hasattr(imu, 'q_gyro_i_Dv'):
+        C_gyro_i = np.asarray(imu.q_gyro_i_Dv.toRotationMatrix(), dtype=float).reshape(3, 3)
+    if hasattr(imu, 'M_accel_Dv'):
+        M_accel = np.asarray(imu.M_accel_Dv.toMatrix3x3(), dtype=float).reshape(3, 3)
+    if hasattr(imu, 'M_gyro_Dv'):
+        M_gyro = np.asarray(imu.M_gyro_Dv.toMatrix3x3(), dtype=float).reshape(3, 3)
+    if hasattr(imu, 'M_accel_gyro_Dv'):
+        A_gyro = np.asarray(imu.M_accel_gyro_Dv.toMatrix3x3(), dtype=float).reshape(3, 3)
+
+    C_gyro_b = np.dot(C_gyro_i, C_i_b)
+
+    header = [
+        "timestamp_ns",
+        "gyro_meas_x", "gyro_meas_y", "gyro_meas_z",
+        "accel_meas_x", "accel_meas_y", "accel_meas_z",
+        "omega_b_x", "omega_b_y", "omega_b_z",
+        "alpha_b_x", "alpha_b_y", "alpha_b_z",
+        "a_w_x", "a_w_y", "a_w_z",
+        "a_b_x", "a_b_y", "a_b_z",
+        "a_i_x", "a_i_y", "a_i_z",
+        "gyro_bias_x", "gyro_bias_y", "gyro_bias_z",
+        "accel_bias_x", "accel_bias_y", "accel_bias_z",
+        "gyro_pred_x", "gyro_pred_y", "gyro_pred_z",
+        "accel_pred_x", "accel_pred_y", "accel_pred_z",
+        "gyro_res_x", "gyro_res_y", "gyro_res_z",
+        "accel_res_x", "accel_res_y", "accel_res_z",
+        "gyro_res_norm", "accel_res_norm",
+    ]
+
+    f = open(filename, 'w')
+    print(",".join(header), file=f)
+    for im in imu.imuData:
+        time = im.stamp.toSec() + imu.timeOffset
+        if time <= bodyspline.t_min() or time >= bodyspline.t_max():
+            continue
+        C_w_b = np.asarray(bodyspline.orientation(time), dtype=float).reshape(3, 3)
+        C_b_w = C_w_b.transpose()
+        a_w = np.asarray(bodyspline.linearAcceleration(time), dtype=float).reshape(3)
+        omega_b = np.asarray(bodyspline.angularVelocityBodyFrame(time), dtype=float).reshape(3)
+        alpha_b = np.asarray(bodyspline.angularAccelerationBodyFrame(time), dtype=float).reshape(3)
+        gyro_bias = np.asarray(imu.gyroBiasDv.spline().evalD(time, 0), dtype=float).reshape(3)
+        accel_bias = np.asarray(imu.accelBiasDv.spline().evalD(time, 0), dtype=float).reshape(3)
+        lever = np.cross(alpha_b, r_b) + np.cross(omega_b, np.cross(omega_b, r_b))
+        a_b = np.dot(C_b_w, a_w - gravity) + lever
+        a_i = np.dot(C_i_b, a_b)
+        gyro_pred = np.dot(M_gyro, np.dot(C_gyro_b, omega_b)) + np.dot(A_gyro, np.dot(C_gyro_b, a_b)) + gyro_bias
+        accel_pred = np.dot(M_accel, a_i) + accel_bias
+        gyro_meas = np.asarray(im.omega, dtype=float).reshape(3)
+        accel_meas = np.asarray(im.alpha, dtype=float).reshape(3)
+        gyro_res = gyro_meas - gyro_pred
+        accel_res = accel_meas - accel_pred
+        values = []
+        values.extend(gyro_meas)
+        values.extend(accel_meas)
+        values.extend(omega_b)
+        values.extend(alpha_b)
+        values.extend(a_w)
+        values.extend(a_b)
+        values.extend(a_i)
+        values.extend(gyro_bias)
+        values.extend(accel_bias)
+        values.extend(gyro_pred)
+        values.extend(accel_pred)
+        values.extend(gyro_res)
+        values.extend(accel_res)
+        values.extend([np.linalg.norm(gyro_res), np.linalg.norm(accel_res)])
+        print("{:.0f}".format(1e9 * time) + "," + \
+              ",".join(map("{:.12g}".format, values)), file=f)
+    f.close()
+
 def saveResultTxt(cself, filename='cam_imu_result.txt'):
     f = open(filename, 'w')
     printResultTxt(cself, stream=f)

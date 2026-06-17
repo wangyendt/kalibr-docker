@@ -144,40 +144,55 @@ Kalibr cam-IMU 本身支持多 camera。源码路径是 `kalibr_calibrate_imu_ca
 
 TUM 两组双目 cam-IMU 数据用来验证这条 multi-camera 路径。`dataset-calib-imu1_512_16.bag` 直接跑 Kalibr;`dataset-calib-imu2_512_16` 是解包格式,先用 Kalibr `kalibr_bagcreater` 转成 bag。两组都用 Kalibr detector 导出同一批角点给 Ceres,并显式使用 bag 口径:不启用 corner-file 的 Cauchy loss,`--imu-trim-edge-count 0`。
 
+先看 2026-06-16 的低 kps joint 第一阶段。这个阶段只用 camchain 初值、Ceres time/gravity prior 和 `scale-misalignment` 扩展 IMU,不把 Kalibr result 灌进 Ceres;它的意义是验证 multi-camera 和 `M_a/M_g/A_g/C_g` 能不能收敛到同一类解,不是最终 IMU residual 平台。
+
 | TUM 数据 | residual mean Ceres/Kalibr | cam0 外参差 | cam1 外参差 | `M_a` rel | `M_g` rel | `A_g` fro | `C_g` fro |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `dataset-calib-imu1_512_16` | `0.11802/0.10646-0.10737 px`, `0.01814/0.00120 rad/s`, `0.14547/0.02147 m/s^2` | `0.0666°`, `1.10 mm`, `-0.106 ms` | `0.0716°`, `0.82 mm`, `-0.105 ms` | `8.63e-4` | `1.19e-3` | `6.51e-4` | `1.98e-3` |
-| `dataset-calib-imu2_512_16` | `0.12070/0.10708-0.10702 px`, `0.01901/0.00117 rad/s`, `0.14869/0.02135 m/s^2` | `0.0215°`, `0.66 mm`, `-0.216 ms` | `0.0447°`, `0.75 mm`, `-0.220 ms` | `6.92e-4` | `1.34e-3` | `1.80e-3` | `1.80e-3` |
+| `dataset-calib-imu1_512_16` | `0.12806/0.10646-0.10737 px`, `0.01856/0.00120 rad/s`, `0.14445/0.02147 m/s^2` | `0.0920°`, `1.32 mm`, `-0.032 ms` | `0.1048°`, `1.35 mm`, `-0.028 ms` | `1.46e-3` | `1.60e-3` | `4.91e-4` | `2.05e-3` |
+| `dataset-calib-imu2_512_16` | `0.12346/0.10708-0.10702 px`, `0.01943/0.00117 rad/s`, `0.14722/0.02135 m/s^2` | `0.0859°`, `0.97 mm`, `-0.046 ms` | `0.0777°`, `0.96 mm`, `-0.044 ms` | `1.11e-3` | `6.85e-4` | `6.19e-4` | `1.99e-3` |
 
-TUM 的结论要分开讲。外参和 IMU intrinsic 是好的 smoke:两组双目里 cam0/cam1 都在 `0.66-1.10 mm`、`0.022-0.072°` 范围,`M_a/M_g` 相对差仍是 `1e-3` 量级。但 IMU residual 没有追平 Kalibr:gyro 从 Kalibr 的约 `0.0012 rad/s` 到 Ceres 的约 `0.018-0.019 rad/s`,accel 从约 `0.021 m/s^2` 到 `0.145-0.149 m/s^2`。这不是数据导出失败,因为同一批角点、同一个 Kalibr camchain 初值、多相机问题规模都已对齐;更像是当前 Ceres 热启动没有读取 Kalibr 优化后的 pose/bias spline,重新拟合 pose controls 后在 TUM 上落到另一个 IMU 残差盆地。文档结论因此不能写成"TUM 精度一致性通过",而应写成:多相机链路和扩展 IMU 参数对齐已打通,TUM 暴露出下一步必须补的 bias/pose 初始化或优化器一致性问题。
+这张表的结论是:外参、多相机链路和扩展 IMU intrinsic 已经对齐到生产可解释范围,但 20/10 kps 的 Ceres pose/bias 轨迹承载不了 TUM 的 IMU residual。`M_a/M_g` 相对差仍是 `1e-3` 量级,`A_g/C_g` Frobenius 也是 `1e-3` 量级;真正没追上的是 gyro/accel residual,从 Kalibr 的约 `0.0012 rad/s` / `0.021 m/s^2` 落到 Ceres 的约 `0.019 rad/s` / `0.145 m/s^2`。
 
-### 2026-06-16 TUM IMU residual 诊断
+### 2026-06-16/17 TUM IMU residual 闭环诊断
 
-问题进一步收敛到一个更具体的目标:TUM 能不能把 Ceres 的 IMU residual 提到和 Kalibr 一个量级。这里先记录当天的诊断,避免把"已经支持 TUM/bag/euroc 读取"和"已经追平 TUM IMU 精度"混在一起。
+问题进一步收敛到一个更具体的目标:TUM 能不能把 Ceres 的 IMU residual 提到和 Kalibr 一个量级。结论是可以,但不能靠继续放大全局自由度,而要把问题拆成二阶段:低 kps 先估全局块,再用高 kps pose/bias 固定全局块追 IMU residual。
 
-先确认输入口径。Ceres 原生 `calibrate_cam_imu` 仍只读统一中间格式:Kalibr camchain/IMU/target YAML,IMU CSV,角点 CSV,以及可选 `corner_poses` CSV。`tools/prepare_ceres_inputs.py` 是新增的外层转换入口:Kalibr pkl 通过 `export_kalibr_corners.py` 转 CSV,ROS bag 通过 `export_kalibr_bag_to_ceres.py` 转 CSV,EuRoC/TUM `mav0` 目录先用 Kalibr `kalibr_bagcreater` 转 bag 再走同一条 bag 导出链路。Ceres 主程序因此不直接依赖 ROS,但已有 pkl/bag/euroc 三种读取路径。
+先确认输入口径。Ceres 原生 `calibrate_cam_imu` 只读统一中间格式:camchain/IMU/target YAML,IMU CSV,一个或多个角点 CSV,以及可选 `corner_poses` CSV;这个标定二进制本身不依赖 Kalibr Docker。`tools/prepare_ceres_inputs.py` 是外层转换入口,支持 `--source-type pkl|bag|euroc`:pkl 通过 `export_kalibr_corners.py` 转 CSV,ROS bag 通过 `export_kalibr_bag_to_ceres.py` 转 CSV,EuRoC/TUM `mav0` 目录先用 `kalibr_bagcreater` 转 bag 再走同一条 bag 导出链路。也就是说,当前 pkl/bag/euroc 的**转换/角点导出**仍复用 Kalibr Docker/ROS 环境,但**标定求解**是原生 Ceres;加 `--run-calibration` 后可以一个脚本先转再标定,`--` 后面的参数会原样传给 `calibrate_cam_imu`。
+
+```bash
+python3 ceres_cam_imu/tools/prepare_ceres_inputs.py --source-type bag \
+  --bag <data.bag> --cams <camchain.yaml> --imu <imu.yaml> --target <april.yaml> \
+  --out-dir <ceres_inputs> --run-calibration -- \
+  --imu-model scale-misalignment --pose-kps 20 --bias-kps 10
+```
 
 TUM 双目的正确 Ceres 调用方式是**一个共享 `--cam` camchain + 两个 `--corners` CSV**。这样 loader 会按 `corner_csv` 序号读取同一 YAML 里的 `cam0/cam1` 内参,并从 camchain 读取各自的 `T_cam_imu/time_shift`。如果误传两个相同的 `--cam`,当前代码会把两路都按 `cam0` section 读取;固定参数诊断里会直接出现 cam1 投影错误。这不是多相机实现缺失,而是 CLI 约定要写清楚。
 
-围绕 `dataset-calib-imu1_512_16` 跑了几组 ablation:
+围绕 `dataset-calib-imu1_512_16` 做逐层定位:
 
-| 变体 | 目的 | 结果 |
+| 证据 | 结果 | 说明 |
 |---|---|---|
-| `diagnostics-original-fixed-shared-camchain` | 固定 Kalibr 外参、time shift、gravity、扩展 IMU intrinsic、pose、bias,只评估当前由 `cam0_corner_poses.csv` 拟合出来的轨迹 | reproj `0.10905 px` 正常,但 gyro `0.20373 rad/s`、accel `7.36222 m/s^2` 很差;说明单帧 AprilGrid pose spline 的导数不能当作 Kalibr 优化轨迹 |
-| `hotstart-motion-prior-tight` | 在原 TUM 热启动基础上加入全段 pose motion prior | residual 仍为 `0.11802 px / 0.01817 rad/s / 0.14549 m/s^2`,没有实质改善 |
-| `hotstart-motion-prior-posefit-tight` | pose 初始化增加 Kalibr 风格 `pose-fit-motion-lambda=1e-4` 和 boundary anchors | 初始 cost 降低,但最终仍收敛到同一 residual 平台 |
-| `hotstart-weak-bias-tight` | 临时把 IMU YAML 的 bias random walk 放大到 `100`,近似弱化 bias motion prior | gyro 降到 `0.00643 rad/s`,但 reproj 退到 `0.34026 px`,accel 升到 `0.17869 m/s^2`,time shift 漂到 `-1.893 ms`,gravity 漂 `2.63 m/s^2`,且 `M_a/M_g/A_g/C_g` 明显发散 |
-| `hotstart-weak-bias-fixed-global-tight` | 弱 bias prior,但固定外参、time shift、gravity、扩展 IMU intrinsic,只让 pose+bias 动 | residual `0.41531 px / 0.01762 rad/s / 0.14455 m/s^2`,基本回到原平台;说明在 Kalibr 全局参数附近,只靠 Ceres 当前 pose+bias 参数化降不到 Kalibr IMU residual |
+| Kalibr `--export-poses` 额外导出 `*-imu-kinematics-imucam-imu0.csv` | 用导出的 `omega_b/a_b/bias/pred/residual` 重新统计,gyro `0.00119649 rad/s`,accel `0.02146520 m/s^2`,逐项复现 Kalibr report | Kalibr 侧 kinematics 导出和 `M_a/M_g/A_g/C_g` 前向公式是可信 oracle |
+| Ceres 20/10 kps 诊断 CSV 与 Kalibr kinematics 按样本对齐 | `gyro_pred` 均值差 `0.01849`, `accel_pred` 均值差 `0.14245`;这几乎等于 Ceres 比 Kalibr 多出来的 residual | 扩展 IMU 前向不是主因,差距来自 pose/bias 轨迹预测 |
+| 100/50 kps 但全局块继续放开 | reproj `0.11770 px`,gyro `0.1940 rad/s`,accel `3.412 m/s^2`,gravity 漂 `15.26 m/s^2` | 高 kps 直接全量优化会发散到错误全局解 |
+| 100/50 kps,固定 Kalibr 全局块,只优化 pose/bias | reproj `0.10636 px`,gyro `0.00119985 rad/s`,accel `0.02128484 m/s^2` | Ceres 的 residual 构造有能力达到 Kalibr 量级 |
+| 100/50 kps,从 Ceres 20/10 result 初始化并固定全局块 | imu1: `0.10602 px / 0.00120366 rad/s / 0.02224586 m/s^2`; imu2: `0.10307 px / 0.00121256 rad/s / 0.02220738 m/s^2` | 不再需要 `--init-from-kalibr` 做第二阶段;生产路径应固化为 Ceres result -> 高 kps pose/bias refine |
 
-还尝试了使用 Kalibr `--export-poses` 的优化后 body trajectory。`poses-imucam-imu0.csv` 的 raw frame 不是 Ceres 的 AprilGrid target frame,直接转成 `corner_poses` 会把视觉 residual 拉到几十像素。用原始 AprilGrid 单帧 pose 与导出的 body pose 做常量 SE(3) gauge 对齐后,仍有约 `0.152 m` / `0.302 rad` 的平均 mismatch;这说明该导出不能简单替换为 Ceres 的 target-frame pose observation。若要把这条路做成生产修复,需要在 Kalibr 侧直接导出 Ceres 可消费的 pose/bias spline control blocks,或者导出同一 gauge 下的 body pose samples 与 bias samples,再在 Ceres 中单独增加 body-pose 初始化入口。
+两组 TUM 的最终二阶段对比如下。第二阶段使用 `--init-from-result <first_stage_result.yaml> --pose-kps 100 --bias-kps 50 --fix-camera-extrinsic --fix-time-shift --fix-gravity --fix-imu-intrinsics`,因此全局块和 `M_a/M_g/A_g/C_g` 固定为第一阶段 Ceres 解,只让 pose/bias 追高频 IMU residual。
 
-这轮诊断的结论是:当前 TUM 差距不是 pkl/bag/euroc 读取问题,也不是多相机内外参没接上;外参和 `M_a/M_g/A_g/C_g` 的相对解已经接近 Kalibr。真正缺的是 Kalibr 优化后的 trajectory/bias 信息,或 Ceres 与 Kalibr 在 body-frame derivative / IMU residual 构造上的逐项一致性验证。下一步应该先做一个固定 Kalibr pose+bias spline 的 residual evaluator:如果固定 Kalibr 轨迹后 Ceres IMU residual 仍高,就查 kinematics 符号和扩展 IMU 前向;如果 residual 立刻接近 Kalibr,再把 pose/bias spline 导入和初始化做成正式功能。
+| TUM 数据 | Kalibr residual mean | Ceres 第一阶段 20/10 | Ceres 第二阶段 100/50 固定全局 | 第二阶段全局差 |
+|---|---|---|---|---|
+| `dataset-calib-imu1_512_16` | `0.10646-0.10737 px`, `0.00119649 rad/s`, `0.02146520 m/s^2` | `0.12806 px`, `0.01856 rad/s`, `0.14445 m/s^2` | `0.10602 px`, `0.00120366 rad/s`, `0.02224586 m/s^2` | cam0 `0.0920°`, `1.32 mm`, `-0.032 ms`, gravity `0.00370 m/s^2` |
+| `dataset-calib-imu2_512_16` | `0.10708-0.10702 px`, `0.00116924 rad/s`, `0.02134775 m/s^2` | `0.12346 px`, `0.01943 rad/s`, `0.14722 m/s^2` | `0.10307 px`, `0.00121256 rad/s`, `0.02220738 m/s^2` | cam0 `0.0859°`, `0.97 mm`, `-0.046 ms`, gravity `0.00926 m/s^2` |
+
+这轮诊断把故事闭上了:最初 TUM 没追上,不是 pkl/bag/euroc 读取问题,也不是多相机内外参没接上,更不是 `M_a/M_g/A_g/C_g` 扩展 IMU 前向公式错。真正问题是 20/10 kps 的 Ceres pose/bias 轨迹太低频;高 kps 足够,但必须先固定全局块。后续生产化应把这个二阶段流程做成 preset 或 wrapper:第一阶段解全局标定和扩展 IMU intrinsic,第二阶段从第一阶段 result 重建状态,固定全局块,用 100/50 kps 细化 pose/bias 并输出最终 residual。
 
 ## 结论
 
 - **是否同一优化问题(表2 热启动)**:不是逐位相同。从 Kalibr 解出发、放开 joint 优化器后,外参平移漂到 0.19–2.63 mm 处收敛——这就是两套实现各自最优点的固有距离(来自权重/前向/优化器弱方向细节)。reproj 仍逐位相同,说明该差在重投影上不可见。早先 staged 暖启动的 ~0.05 mm 是调度假象。
 - **从零独立精度(表1)**:独立初始化充分收敛后,reproj 与 Kalibr 逐位相同(±0.001 px),旋转差多数 < 0.02°,time-shift 差多数 < 1.5 ms;外参平移差 1.3–4.7 mm = 上面的固有差 + 从零收敛的额外代价。
-- **扩展 IMU / 多相机 / 输入格式**:`scale-misalignment` 在三组生产数据上已做 Kalibr-vs-Ceres 全量对比,`M_a/M_g` 相对差是 `1e-3` 量级,外参差为 `0.053-0.082°` / `1.85-6.13 mm`;Ceres 主程序仍读统一 CSV/YAML,但 wrapper 已支持 pkl、ROS bag、EuRoC/TUM `mav0` 转换。TUM 双目验证了多相机链路,但 IMU residual 没追上 Kalibr;2026-06-16 的 ablation 指向 Kalibr pose/bias spline 导入或 body-frame derivative 逐项对齐,不是数据读取失败。
+- **扩展 IMU / 多相机 / 输入格式**:`scale-misalignment` 在三组生产数据上已做 Kalibr-vs-Ceres 全量对比,`M_a/M_g` 相对差是 `1e-3` 量级,外参差为 `0.053-0.082°` / `1.85-6.13 mm`;TUM 双目也验证了 multi-camera 和 `M_a/M_g/A_g/C_g` 一致性。Ceres 主程序读统一 CSV/YAML,不依赖 Kalibr Docker 求解;`prepare_ceres_inputs.py` 支持 pkl、ROS bag、EuRoC/TUM `mav0` 转换并可 `--run-calibration` 一键转完直接跑标定,但转换/角点导出当前仍复用 Kalibr Docker/ROS 环境。
+- **TUM IMU residual**:旧 20/10 kps joint 第一阶段停在 `0.018-0.019 rad/s` / `0.144-0.147 m/s^2`;新增 kinematics 诊断证明差距来自 pose/bias 轨迹预测,不是扩展 IMU 前向。二阶段从 Ceres result 初始化、固定外参/time/gravity/IMU intrinsic、用 100/50 kps 优化 pose/bias 后,两组 TUM 达到 `0.00120-0.00121 rad/s` / `0.0222 m/s^2`,已经和 Kalibr 的 `0.00117-0.00120 rad/s` / `0.0213-0.0215 m/s^2` 同量级。
 - **速度**:Ceres 原生 80–125 s vs Kalibr 模拟 Docker 145–261 s。注意这不是 native-vs-native——Kalibr 在本机只能 amd64 模拟(有 3–10× 惩罚);要严格倍率需在同一台 Linux 上各跑一次。
 - **要抹平最后这几毫米**:外参平移是弱可观方向(reproj 对它不敏感),需对齐 Kalibr 优化器内核(LM lambda 策略 + BlockCholesky + `deltaX/deltaJ` 绝对停止),或对外参平移块做变量缩放/预条件。这是单独的下一步。
 
