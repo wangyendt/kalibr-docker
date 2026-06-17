@@ -1449,6 +1449,9 @@ int main(int argc, char **argv) {
         ceres_cam_imu::estimateCameraImuTimeShiftPrior(
             poses, imu_samples, initial_T_c_b, time_shift_options);
     options.initial_camera_time_shift_s = time_shift.shift_s;
+    if (!initial_camera_time_shifts.empty()) {
+      initial_camera_time_shifts[0] = time_shift.shift_s;
+    }
     const std::streamsize old_precision = std::cout.precision();
     std::cout << std::setprecision(17)
               << "estimated time shift prior: shift_s=" << time_shift.shift_s
