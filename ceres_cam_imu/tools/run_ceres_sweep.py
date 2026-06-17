@@ -483,6 +483,11 @@ def file_arg(args, files, key):
     return files.get(key) or getattr(args, key)
 
 
+def kalibr_result_path(args, files=None):
+    files = files or {}
+    return args.dataset / file_arg(args, files, "kalibr_result")
+
+
 def base_command(args, files=None):
     dataset = args.dataset
     files = files or {}
@@ -501,9 +506,6 @@ def base_command(args, files=None):
         "--corner-poses",
         str(require_file(dataset / file_arg(args, files, "corner_poses"),
                          "corner pose CSV")),
-        "--kalibr-result",
-        str(require_file(dataset / file_arg(args, files, "kalibr_result"),
-                         "Kalibr result")),
     ]
 
 
@@ -555,6 +557,15 @@ def run_variant(args, sweep_dir, name, variant_args, files=None):
         + variant_args
         + list(args.extra_arg)
     )
+    if option_present(tokens, "--init-from-kalibr") and not option_present(
+        tokens, "--kalibr-result"
+    ):
+        tokens.extend(
+            [
+                "--kalibr-result",
+                str(require_file(kalibr_result_path(args, files), "Kalibr result")),
+            ]
+        )
 
     result_yaml = option_value(tokens, "--output-result")
     is_dry_run = option_present(tokens, "--dry-run")
@@ -585,7 +596,7 @@ def run_variant(args, sweep_dir, name, variant_args, files=None):
         compare_cmd = [
             str(args.compare_bin),
             "--kalibr-result",
-            str(args.dataset / file_arg(args, files or {}, "kalibr_result")),
+            str(kalibr_result_path(args, files)),
             "--ceres-result",
             result_yaml,
         ]

@@ -16,6 +16,23 @@ import sys
 
 KALIBR_IMAGE = "kalibr-camera-calibration:20.04"
 
+DEFAULT_CALIBRATION_FLAGS = [
+    "--corner-defaults",
+    "--estimate-time-shift-prior",
+    "--estimate-orientation-gravity-prior",
+    "--pose-fit-boundary-anchors",
+    "--pose-motion-prior",
+]
+
+DEFAULT_CALIBRATION_VALUES = [
+    ("--pose-fit-motion-lambda", "0.0001"),
+    ("--time-shift-prior-sigma", "0.0001"),
+    ("--pose-motion-translation-variance", "10"),
+    ("--pose-motion-rotation-variance", "1"),
+    ("--max-iterations", "150"),
+    ("--solver-max-trust-region-radius", "10000000"),
+]
+
 
 def repo_dir():
     return pathlib.Path(__file__).resolve().parents[2]
@@ -30,6 +47,22 @@ def run(command, print_only=False):
     if print_only:
         return 0
     return subprocess.call(command)
+
+
+def has_option(tokens, option):
+    prefix = option + "="
+    return option in tokens or any(token.startswith(prefix) for token in tokens)
+
+
+def default_calibration_args(passthrough_args):
+    defaults = []
+    for flag in DEFAULT_CALIBRATION_FLAGS:
+        if not has_option(passthrough_args, flag):
+            defaults.append(flag)
+    for option, value in DEFAULT_CALIBRATION_VALUES:
+        if not has_option(passthrough_args, option):
+            defaults.extend([option, value])
+    return defaults
 
 
 def add_path_mounts(command, paths):
@@ -276,6 +309,8 @@ def run_calibration(args, passthrough_args):
             str(output_result),
         ]
     )
+    if not args.no_default_calibration_args:
+        command.extend(default_calibration_args(passthrough_args))
     command.extend(passthrough_args)
     return run(command, args.print_only)
 
@@ -370,12 +405,20 @@ def parse_args(argv=None):
     parser.add_argument(
         "--run-calibration",
         action="store_true",
-        help="after conversion, run native ceres_cam_imu/build/calibrate_cam_imu",
+        help=(
+            "after conversion, run native ceres_cam_imu/build/calibrate_cam_imu "
+            "with the production single-stage defaults"
+        ),
+    )
+    parser.add_argument(
+        "--no-default-calibration-args",
+        action="store_true",
+        help="do not add the production single-stage defaults before passthrough args",
     )
     parser.add_argument(
         "--run-two-stage",
         action="store_true",
-        help="after conversion, run the two-stage Ceres TUM-parity workflow",
+        help="after conversion, run the two-stage Ceres diagnostic workflow",
     )
     parser.add_argument(
         "--calibrate-bin",
