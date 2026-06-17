@@ -8,6 +8,7 @@ ROS bags, or EuRoC image folders into those CSV files.
 
 import argparse
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -195,9 +196,103 @@ def prepare_euroc(args):
     return run(command, args.print_only)
 
 
-def parse_args():
+def camera_count_from_camchain(cams_path):
+    path = pathlib.Path(cams_path).expanduser().resolve()
+    if not path.is_file():
+        return 1
+    max_index = -1
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"^cam([0-9]+):\s*$", line)
+        if match:
+            max_index = max(max_index, int(match.group(1)))
+    return max_index + 1 if max_index >= 0 else 1
+
+
+def expected_corner_count(args):
+    if args.source_type == "pkl" and args.corner_pkl:
+        return len(args.corner_pkl)
+    return camera_count_from_camchain(args.cams)
+
+
+def generated_corners(out_dir, count):
+    return [out_dir / f"cam{index}_corners.csv" for index in range(count)]
+
+
+def require_generated(path, label, print_only):
+    if not print_only and not path.is_file():
+        raise FileNotFoundError(f"{label} not found after conversion: {path}")
+    return path
+
+
+def run_calibration(args, passthrough_args):
+    for name, value in [
+        ("--cams", args.cams),
+        ("--imu", args.imu),
+        ("--target", args.target),
+    ]:
+        if not value:
+            raise ValueError(f"{name} is required with --run-calibration")
+
+    out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
+    imu_data = out_dir / "imu.csv"
+    if args.source_type == "pkl":
+        if not args.imu_data:
+            raise ValueError(
+                "--imu-data is required with --source-type pkl --run-calibration"
+            )
+        imu_data = pathlib.Path(args.imu_data).expanduser().resolve()
+    require_generated(imu_data, "IMU CSV", args.print_only)
+
+    corner_count = expected_corner_count(args)
+    corner_paths = generated_corners(out_dir, corner_count)
+    for index, corner_path in enumerate(corner_paths):
+        require_generated(corner_path, f"camera {index} corners CSV", args.print_only)
+    corner_poses = require_generated(
+        out_dir / "cam0_corner_poses.csv", "cam0 corner poses CSV", args.print_only
+    )
+
+    output_result = pathlib.Path(args.output_result).expanduser().resolve()
+    if not args.print_only:
+        output_result.parent.mkdir(parents=True, exist_ok=True)
+
+    command = [
+        str(pathlib.Path(args.calibrate_bin).expanduser().resolve()),
+        "--cam",
+        str(pathlib.Path(args.cams).expanduser().resolve()),
+        "--imu",
+        str(pathlib.Path(args.imu).expanduser().resolve()),
+        "--target",
+        str(pathlib.Path(args.target).expanduser().resolve()),
+        "--imu-data",
+        str(imu_data),
+    ]
+    for corner_path in corner_paths:
+        command.extend(["--corners", str(corner_path)])
+    command.extend(
+        [
+            "--corner-poses",
+            str(corner_poses),
+            "--output-result",
+            str(output_result),
+        ]
+    )
+    command.extend(passthrough_args)
+    return run(command, args.print_only)
+
+
+def parse_args(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    passthrough_args = []
+    if "--" in argv:
+        split_index = argv.index("--")
+        passthrough_args = argv[split_index + 1 :]
+        argv = argv[:split_index]
+
     parser = argparse.ArgumentParser(
-        description="Convert pkl, bag, or EuRoC-style datasets to Ceres CSV inputs."
+        description=(
+            "Convert pkl, bag, or EuRoC-style datasets to Ceres CSV inputs, "
+            "optionally followed by native Ceres calibration."
+        )
     )
     parser.add_argument("--source-type", choices=["pkl", "bag", "euroc"], required=True)
     parser.add_argument("--out-dir", required=True)
@@ -210,23 +305,42 @@ def parse_args():
     parser.add_argument("--output-bag")
     parser.add_argument("--cams")
     parser.add_argument("--imu")
+    parser.add_argument("--imu-data")
     parser.add_argument("--target")
     parser.add_argument("--bag-from-to", type=float, nargs=2)
     parser.add_argument("--bag-freq", type=float)
     parser.add_argument("--perform-synchronization", action="store_true")
-    return parser.parse_args()
+    parser.add_argument(
+        "--run-calibration",
+        action="store_true",
+        help="after conversion, run native ceres_cam_imu/build/calibrate_cam_imu",
+    )
+    parser.add_argument(
+        "--calibrate-bin",
+        default=str(repo_dir() / "ceres_cam_imu" / "build" / "calibrate_cam_imu"),
+    )
+    parser.add_argument("--output-result")
+    args = parser.parse_args(argv)
+    if args.output_result is None:
+        args.output_result = str(pathlib.Path(args.out_dir) / "result.yaml")
+    args.passthrough_args = passthrough_args
+    return args
 
 
 def main():
     args = parse_args()
     try:
         if args.source_type == "pkl":
-            return prepare_pkl(args)
-        if args.source_type == "bag":
-            return prepare_bag(args)
-        if args.source_type == "euroc":
-            return prepare_euroc(args)
-        raise ValueError(f"unsupported source type: {args.source_type}")
+            rc = prepare_pkl(args)
+        elif args.source_type == "bag":
+            rc = prepare_bag(args)
+        elif args.source_type == "euroc":
+            rc = prepare_euroc(args)
+        else:
+            raise ValueError(f"unsupported source type: {args.source_type}")
+        if rc != 0 or not args.run_calibration:
+            return rc
+        return run_calibration(args, args.passthrough_args)
     except Exception as exc:
         print(f"prepare_ceres_inputs failed: {exc}", file=sys.stderr)
         return 2

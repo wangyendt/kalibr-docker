@@ -61,7 +61,7 @@ cmake --build /work/ceres_cam_imu/build -j
 | 角点观测 | `--corners` | CSV: `timestamp_ns,corner_id,pixel_x,pixel_y,target_x,target_y,target_z` |
 | target pose 初值 | `--corner-poses` | CSV: `timestamp_ns,T_t_c_00...T_t_c_33` |
 
-外部格式通过 `tools/prepare_ceres_inputs.py` 转成上述 CSV。转换需要 `kalibr-camera-calibration:20.04` Docker 镜像,因为 Kalibr pkl 和 ROS bag target extraction 依赖 Kalibr 的 Python/C++ 扩展类型。转换后,Ceres 标定本身不依赖 ROS。
+外部格式通过 `tools/prepare_ceres_inputs.py` 转成上述 CSV。转换需要 `kalibr-camera-calibration:20.04` Docker 镜像,因为 Kalibr pkl 和 ROS bag target extraction 依赖 Kalibr 的 Python/C++ 扩展类型。转换后,Ceres 标定本身不依赖 ROS/Kalibr Docker;也可以用同一个 wrapper 先转换再调用 native `calibrate_cam_imu`。
 
 ```bash
 # Kalibr corner pickle -> cam0_corners.csv / cam0_corner_poses.csv
@@ -78,7 +78,16 @@ python3 ceres_cam_imu/tools/prepare_ceres_inputs.py \
   --source-type euroc --euroc-dir dataset-calib-imu2_512_16 \
   --cams camchain.yaml --imu imu.yaml --target aprilgrid.yaml \
   --out-dir out/ceres_inputs
+
+# ROS bag -> Ceres CSV -> native Ceres calibration
+python3 ceres_cam_imu/tools/prepare_ceres_inputs.py \
+  --source-type bag --bag data.bag --cams camchain.yaml --imu imu.yaml \
+  --target aprilgrid.yaml --out-dir out/ceres_inputs --run-calibration \
+  --output-result out/ceres_inputs/result.yaml -- \
+  --init-from-camchain --imu-model scale-misalignment --max-iterations 100
 ```
+
+`--run-calibration` 后会把 `out/ceres_inputs/imu.csv`、`cam*_corners.csv` 和 `cam0_corner_poses.csv` 交给 `ceres_cam_imu/build/calibrate_cam_imu`。`--` 后面的参数原样透传给 Ceres 标定器。pkl 只包含角点时,one-shot 标定还需要额外提供已有的 `--imu-data <imu.csv>`。
 
 也可以直接在 Kalibr Python 环境里调用底层导出脚本:
 
