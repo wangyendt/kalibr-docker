@@ -280,6 +280,63 @@ def run_calibration(args, passthrough_args):
     return run(command, args.print_only)
 
 
+def run_two_stage_calibration(args, passthrough_args):
+    for name, value in [
+        ("--cams", args.cams),
+        ("--imu", args.imu),
+        ("--target", args.target),
+    ]:
+        if not value:
+            raise ValueError(f"{name} is required with --run-two-stage")
+
+    out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
+    imu_data = out_dir / "imu.csv"
+    if args.source_type == "pkl":
+        if not args.imu_data:
+            raise ValueError(
+                "--imu-data is required with --source-type pkl --run-two-stage"
+            )
+        imu_data = pathlib.Path(args.imu_data).expanduser().resolve()
+    require_generated(imu_data, "IMU CSV", args.print_only)
+
+    corner_count = expected_corner_count(args)
+    corner_paths = generated_corners(out_dir, corner_count)
+    for index, corner_path in enumerate(corner_paths):
+        require_generated(corner_path, f"camera {index} corners CSV", args.print_only)
+    corner_poses = require_generated(
+        out_dir / "cam0_corner_poses.csv", "cam0 corner poses CSV", args.print_only
+    )
+
+    command = [
+        sys.executable,
+        str(pathlib.Path(args.two_stage_bin).expanduser().resolve()),
+        "--cam",
+        str(pathlib.Path(args.cams).expanduser().resolve()),
+        "--imu",
+        str(pathlib.Path(args.imu).expanduser().resolve()),
+        "--target",
+        str(pathlib.Path(args.target).expanduser().resolve()),
+        "--imu-data",
+        str(imu_data),
+    ]
+    for corner_path in corner_paths:
+        command.extend(["--corners", str(corner_path)])
+    command.extend(
+        [
+            "--corner-poses",
+            str(corner_poses),
+            "--out-dir",
+            str(out_dir / "two_stage"),
+            "--calibrate-bin",
+            str(pathlib.Path(args.calibrate_bin).expanduser().resolve()),
+        ]
+    )
+    command.extend(passthrough_args)
+    if args.print_only:
+        command.append("--print-only")
+    return run(command, args.print_only)
+
+
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     passthrough_args = []
@@ -316,11 +373,22 @@ def parse_args(argv=None):
         help="after conversion, run native ceres_cam_imu/build/calibrate_cam_imu",
     )
     parser.add_argument(
+        "--run-two-stage",
+        action="store_true",
+        help="after conversion, run the two-stage Ceres TUM-parity workflow",
+    )
+    parser.add_argument(
         "--calibrate-bin",
         default=str(repo_dir() / "ceres_cam_imu" / "build" / "calibrate_cam_imu"),
     )
+    parser.add_argument(
+        "--two-stage-bin",
+        default=str(repo_dir() / "ceres_cam_imu" / "tools" / "run_ceres_two_stage.py"),
+    )
     parser.add_argument("--output-result")
     args = parser.parse_args(argv)
+    if args.run_calibration and args.run_two_stage:
+        parser.error("--run-calibration and --run-two-stage are mutually exclusive")
     if args.output_result is None:
         args.output_result = str(pathlib.Path(args.out_dir) / "result.yaml")
     args.passthrough_args = passthrough_args
@@ -338,9 +406,13 @@ def main():
             rc = prepare_euroc(args)
         else:
             raise ValueError(f"unsupported source type: {args.source_type}")
-        if rc != 0 or not args.run_calibration:
+        if rc != 0:
             return rc
-        return run_calibration(args, args.passthrough_args)
+        if args.run_two_stage:
+            return run_two_stage_calibration(args, args.passthrough_args)
+        if args.run_calibration:
+            return run_calibration(args, args.passthrough_args)
+        return rc
     except Exception as exc:
         print(f"prepare_ceres_inputs failed: {exc}", file=sys.stderr)
         return 2
