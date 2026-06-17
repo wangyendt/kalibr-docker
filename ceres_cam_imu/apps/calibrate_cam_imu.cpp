@@ -264,13 +264,16 @@ void usage() {
          "[--pose-motion-local-rotation-scale F] [--top-residuals N] "
          "[--inspect-time S] [--inspect-times S[,S...]] "
          "[--inspect-window S] [--output-result result.yaml] "
-         "[--export-imu-diagnostics imu.csv] [--staged]\n";
+         "[--export-spline-controls] [--export-imu-diagnostics imu.csv] "
+         "[--staged]\n";
   std::cout << "  --time-padding / --timeoffset-padding pads splines by 2*S "
                "on each side.\n";
   std::cout
       << "  --corner-defaults sets the standard corner-file defaults before "
          "parsing explicit overrides: pose/bias kps 100/50, max-iter 30, "
-         "time padding 0.04, IMU edge trim 1000, and Cauchy width 10. "
+         "time padding 0.04, IMU edge trim 1000, Cauchy width 10, and "
+         "production stopping: max-iter, absolute cost change 5e-2, "
+         "max parameter delta 1e-2. "
          "--kalibr-corner-defaults is accepted as a deprecated alias.\n";
   std::cout
       << "  --pose-fit-motion-lambda adds Kalibr-style derivative-integral "
@@ -777,6 +780,8 @@ int main(int argc, char **argv) {
     options.bias_knots_per_second = 50.0;
     options.time_padding_s = 0.04;
     options.max_iterations = 30;
+    options.solver_absolute_cost_change_tolerance = 5e-2;
+    options.solver_absolute_parameter_tolerance = 1e-2;
     options.camera_loss_type = ceres_cam_imu::RobustLossType::kCauchy;
     options.gyro_loss_type = ceres_cam_imu::RobustLossType::kCauchy;
     options.accel_loss_type = ceres_cam_imu::RobustLossType::kCauchy;
@@ -990,6 +995,8 @@ int main(int argc, char **argv) {
       doubleArg(argc, argv, "--inspect-window", 0.02);
   const std::string output_result_path =
       argValue(argc, argv, "--output-result");
+  const bool export_spline_controls =
+      hasFlag(argc, argv, "--export-spline-controls");
   const std::string imu_diagnostics_path =
       argValue(argc, argv, "--export-imu-diagnostics");
   const int imu_trim_edge_count =
@@ -1735,6 +1742,7 @@ int main(int argc, char **argv) {
     if (!output_result_path.empty()) {
       ceres_cam_imu::CalibrationResultWriterOptions writer_options;
       writer_options.include_kalibr_comparison = have_kalibr_result;
+      writer_options.include_spline_controls = export_spline_controls;
       writer_options.kalibr_result = kalibr;
       ceres_cam_imu::writeCalibrationResultYaml(output_result_path, state,
                                                 residual_stats, writer_options);
@@ -1801,6 +1809,7 @@ int main(int argc, char **argv) {
   if (!output_result_path.empty()) {
     ceres_cam_imu::CalibrationResultWriterOptions writer_options;
     writer_options.include_kalibr_comparison = have_kalibr_result;
+    writer_options.include_spline_controls = export_spline_controls;
     writer_options.kalibr_result = kalibr;
     ceres_cam_imu::writeCalibrationResultYaml(output_result_path, state,
                                               residual_stats, writer_options);

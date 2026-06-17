@@ -10,6 +10,7 @@ namespace ceres_cam_imu {
 
 struct CalibrationResultWriterOptions {
   bool include_kalibr_comparison = false;
+  bool include_spline_controls = false;
   KalibrResult kalibr_result;
 };
 

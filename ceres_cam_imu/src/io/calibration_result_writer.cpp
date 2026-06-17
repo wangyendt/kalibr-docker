@@ -1,6 +1,7 @@
 #include "ceres_cam_imu/io/calibration_result_writer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -60,6 +61,40 @@ void writeMatrix3(std::ostream& os, const Mat3& value) {
   os << "]";
 }
 
+template <std::size_t N>
+void writeStdArray(std::ostream& os, const std::array<double, N>& value) {
+  os << "[";
+  for (std::size_t i = 0; i < N; ++i) {
+    if (i != 0) {
+      os << ", ";
+    }
+    os << value[i];
+  }
+  os << "]";
+}
+
+template <typename Spline>
+void writeSplineMetadata(std::ostream& os, const Spline& spline,
+                         const std::string& indent) {
+  os << indent << "order: " << spline.order() << "\n";
+  os << indent << "t_min_s: " << spline.tMin() << "\n";
+  os << indent << "t_max_s: " << spline.tMax() << "\n";
+  os << indent << "dt_s: " << spline.dt() << "\n";
+  os << indent << "num_segments: " << spline.numSegments() << "\n";
+  os << indent << "num_coefficients: " << spline.numCoefficients() << "\n";
+}
+
+template <typename Blocks>
+void writeControlBlocks(std::ostream& os, const Blocks& blocks,
+                        const std::string& indent) {
+  os << indent << "controls:\n";
+  for (const auto& block : blocks) {
+    os << indent << "  - ";
+    writeStdArray(os, block.values);
+    os << "\n";
+  }
+}
+
 void writeResidualStats(std::ostream& os, const char* key,
                         const ResidualMagnitudeStats& stats) {
   os << "  " << key << ":\n";
@@ -109,14 +144,29 @@ void writeCalibrationResultYaml(
   output << "gravity: ";
   writeVector3(output, gravity);
   output << "\n";
+  output << "imu_extrinsic:\n";
+  output << "  r_b: ";
+  writeVector3(output, Vec3(state.imu_extrinsic.values[0],
+                            state.imu_extrinsic.values[1],
+                            state.imu_extrinsic.values[2]));
+  output << "\n";
+  output << "  r_i_b: ";
+  writeVector3(output, Vec3(state.imu_extrinsic.values[3],
+                            state.imu_extrinsic.values[4],
+                            state.imu_extrinsic.values[5]));
+  output << "\n";
   if (!state.camera_extrinsics.empty()) {
     output << "camera_chain:\n";
     for (std::size_t camera_index = 0;
          camera_index < state.camera_extrinsics.size(); ++camera_index) {
       const Mat4 T_camera_body =
-          pose6ToMatrix(state.camera_extrinsics[camera_index]);
+          camera_index == 0 ? T_c_b
+                            : pose6ToMatrix(
+                                  state.camera_extrinsics[camera_index]);
       const double time_shift =
-          camera_index < state.camera_time_shifts.size()
+          camera_index == 0
+              ? state.camera_time_shift_s.value
+              : camera_index < state.camera_time_shifts.size()
               ? state.camera_time_shifts[camera_index].value
               : 0.0;
       output << "  - camera_index: " << camera_index << "\n";
@@ -156,18 +206,25 @@ void writeCalibrationResultYaml(
   output << "\n";
 
   output << "pose_spline:\n";
-  output << "  order: " << state.pose_spline.order() << "\n";
-  output << "  t_min_s: " << state.pose_spline.tMin() << "\n";
-  output << "  t_max_s: " << state.pose_spline.tMax() << "\n";
-  output << "  dt_s: " << state.pose_spline.dt() << "\n";
-  output << "  num_segments: " << state.pose_spline.numSegments() << "\n";
-  output << "  num_coefficients: " << state.pose_spline.numCoefficients()
-         << "\n";
+  writeSplineMetadata(output, state.pose_spline, "  ");
+  if (options.include_spline_controls) {
+    writeControlBlocks(output, state.pose_controls, "  ");
+  }
   output << "bias_splines:\n";
   output << "  gyro_num_coefficients: "
          << state.gyro_bias_spline.numCoefficients() << "\n";
   output << "  accel_num_coefficients: "
          << state.accel_bias_spline.numCoefficients() << "\n";
+  output << "  gyro:\n";
+  writeSplineMetadata(output, state.gyro_bias_spline, "    ");
+  if (options.include_spline_controls) {
+    writeControlBlocks(output, state.gyro_bias_controls, "    ");
+  }
+  output << "  accel:\n";
+  writeSplineMetadata(output, state.accel_bias_spline, "    ");
+  if (options.include_spline_controls) {
+    writeControlBlocks(output, state.accel_bias_controls, "    ");
+  }
 
   output << "residual_statistics:\n";
   writeResidualStats(output, "reprojection_px",
