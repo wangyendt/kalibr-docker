@@ -1,0 +1,82 @@
+name: Sync kalibr-camimu-ceres submodule
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [kalibr-camimu-ceres-updated]
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-kalibr-camimu-ceres-submodule
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update submodule to tracked branch
+        id: update
+        run: |
+          set -euo pipefail
+
+          old_sha="$(git rev-parse HEAD:kalibr-camimu-ceres)"
+
+          git submodule sync -- kalibr-camimu-ceres
+          git submodule update --init --recursive -- kalibr-camimu-ceres
+          git submodule update --remote --recursive -- kalibr-camimu-ceres
+
+          new_sha="$(git -C kalibr-camimu-ceres rev-parse HEAD)"
+
+          {
+            echo "old_sha=${old_sha}"
+            echo "new_sha=${new_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+          if [ "${old_sha}" != "${new_sha}" ]; then
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+          git diff --submodule=log -- kalibr-camimu-ceres
+
+      - name: Commit and push update
+        if: steps.update.outputs.changed == 'true'
+        env:
+          OLD_SHA: ${{ steps.update.outputs.old_sha }}
+          NEW_SHA: ${{ steps.update.outputs.new_sha }}
+        run: |
+          set -euo pipefail
+
+          git add kalibr-camimu-ceres
+          git commit \
+            -m "chore: update kalibr-camimu-ceres submodule" \
+            -m "Update kalibr-camimu-ceres from ${OLD_SHA} to ${NEW_SHA}."
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Write sync summary
+        run: |
+          {
+            echo "### kalibr-camimu-ceres sync"
+            echo ""
+            echo "- Old: \`${{ steps.update.outputs.old_sha }}\`"
+            echo "- New: \`${{ steps.update.outputs.new_sha }}\`"
+            echo "- Changed: \`${{ steps.update.outputs.changed }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
