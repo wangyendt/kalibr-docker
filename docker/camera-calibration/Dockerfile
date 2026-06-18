@@ -1,4 +1,5 @@
-FROM osrf/ros:noetic-desktop-full
+ARG BASE_IMAGE_PLATFORM=linux/amd64
+FROM --platform=${BASE_IMAGE_PLATFORM} osrf/ros:noetic-desktop-full
 
 SHELL ["/bin/bash", "-c"]
 
@@ -29,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtbb-dev \
     libv4l-dev \
     nano \
+    pybind11-dev \
     python3-catkin-tools \
     python3-dev \
     python3-h5py \
@@ -51,20 +53,6 @@ RUN pip3 install --no-cache-dir \
     PyYAML \
     tqdm
 
-RUN mkdir -p "${WORKSPACE}/src"
-COPY . "${WORKSPACE}/src/kalibr"
-
-RUN source /opt/ros/noetic/setup.bash \
-  && cd "${WORKSPACE}" \
-  && catkin init \
-  && catkin config --extend /opt/ros/noetic \
-  && catkin config --cmake-args -DCMAKE_BUILD_TYPE=Release \
-  && catkin build -j"$(nproc)"
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    pybind11-dev \
-  && rm -rf /var/lib/apt/lists/*
-
 RUN git clone --depth 1 "${VIO_COMMON_REPO}" "${VIO_COMMON_ROOT}" \
   && if [[ -n "${VIO_COMMON_REF}" ]]; then \
        cd "${VIO_COMMON_ROOT}" \
@@ -76,6 +64,25 @@ RUN git clone --depth 1 "${VIO_COMMON_REPO}" "${VIO_COMMON_ROOT}" \
        -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -fno-lto" \
   && cmake --build "${VIO_COMMON_ROOT}/timestamp_corrector/build" -- -j1 \
   && cp "${VIO_COMMON_ROOT}"/timestamp_corrector/build/TimestampCorrector*.so "${VIO_COMMON_PYTHON}/"
+
+RUN mkdir -p "${WORKSPACE}/src/kalibr"
+COPY Schweizer-Messer "${WORKSPACE}/src/kalibr/Schweizer-Messer"
+COPY aslam_cv "${WORKSPACE}/src/kalibr/aslam_cv"
+COPY aslam_incremental_calibration "${WORKSPACE}/src/kalibr/aslam_incremental_calibration"
+COPY aslam_nonparametric_estimation "${WORKSPACE}/src/kalibr/aslam_nonparametric_estimation"
+COPY aslam_offline_calibration "${WORKSPACE}/src/kalibr/aslam_offline_calibration"
+COPY aslam_optimizer "${WORKSPACE}/src/kalibr/aslam_optimizer"
+COPY catkin_simple "${WORKSPACE}/src/kalibr/catkin_simple"
+COPY opencv2_catkin "${WORKSPACE}/src/kalibr/opencv2_catkin"
+
+RUN source /opt/ros/noetic/setup.bash \
+  && cd "${WORKSPACE}" \
+  && catkin init \
+  && catkin config --extend /opt/ros/noetic \
+  && catkin config --cmake-args -DCMAKE_BUILD_TYPE=Release \
+  && catkin build kalibr -j"$(nproc)"
+
+COPY tools "${WORKSPACE}/src/kalibr/tools"
 
 ENV PYTHONPATH=${WORKSPACE}/src/kalibr/tools/camera_calibration:${VIO_COMMON_PYTHON}:${VIO_COMMON_ROOT}/timestamp_corrector/build
 

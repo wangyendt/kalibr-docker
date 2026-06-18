@@ -1,11 +1,16 @@
 .git
+.gitnexus
 .github
+.codex
+.agents
 **/.DS_Store
 **/__pycache__
 **/*.pyc
 build
 devel
 logs
+docs
+kalibr-camimu-ceres
 *.bag
 *.h5
 *.mp4
