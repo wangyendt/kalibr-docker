@@ -2,7 +2,7 @@
 
 ## 背景
 
-这个 know-how 记录的是对外使用 Kalibr Docker 标定工具时最容易混淆的几件事：另一台电脑应该执行哪些命令、标定板 yaml 要写成什么格式、只给图片能跑到哪一步、cam-cam 的 Docker fast 模式和 ProductionCalibration 项目版是否一致。
+这个 know-how 记录的是对外使用 Kalibr Docker 标定工具时最容易混淆的几件事：另一台电脑应该执行哪些命令、标定板 yaml 要写成什么格式、只给图片能跑到哪一步、cam-cam 的 Docker fast 模式和 BenchmarkCalibration 项目版是否一致。
 
 这些信息需要从常用命令、路线图和一致性实验中抽出来单独保存。未来无论是写 README、发布 DockerHub/GHCR 镜像，还是给外部用户排查问题，都应该优先引用这份规则。
 
@@ -12,7 +12,7 @@
 
 `cam-imu` 至少还需要已知相机内参 camchain、IMU 噪声 yaml、相机观测文件 corner-file 或 H5、图像时间戳和 IMU 数据文件。
 
-Docker 当前 forked Kalibr 的 cam-cam fast 模式已经修复了多进程读 bag 的共享句柄问题；但本地 ProductionCalibration 项目版 cam-cam 还没有同步这个 `reopen()` 修复，所以不能说 Docker fast 和 ProductionCalibration fast 现在已经严格一致。
+Docker 当前 forked Kalibr 的 cam-cam fast 模式已经修复了多进程读 bag 的共享句柄问题；但本地 BenchmarkCalibration 项目版 cam-cam 还没有同步这个 `reopen()` 修复，所以不能说 Docker fast 和 BenchmarkCalibration fast 现在已经严格一致。
 
 ## 新机器怎么拿到镜像
 
@@ -45,7 +45,7 @@ Docker 当前 forked Kalibr 的 cam-cam fast 模式已经修复了多进程读 b
 | CLAHE 预处理 | 69 | 光照或局部对比度影响 AprilTag 时使用 |
 | 强制 resize | 72 | 输入分辨率或宽高比不一致时建议显式指定 |
 | 指定焦距初值 | 75 | 默认焦距初始化明显不合适时使用 |
-| 推荐 fast auto | 78 | 默认生产推荐：先快跑，异常自动单线程兜底 |
+| 推荐 fast auto | 78 | 默认推荐：先快跑，异常自动单线程兜底 |
 | 强制 fast | 81 | 只适合确认环境稳定且愿意自己承担风险的实验 |
 | 强制 stable | 84 | 等价于 `--no-multithreading`，更稳但慢 |
 | verbose 调试 | 87 | 打印 Kalibr 原始日志并保存更多中间文件 |
@@ -59,10 +59,10 @@ cam-imu 的常用命令行号如下：
 
 | 场景 | 行号 | 说明 |
 | --- | ---: | --- |
-| ProductionCalibration 兼容 corner-file 模式 | 100 | 需要 corner pkl、图像时间戳、IMU 数据 |
+| BenchmarkCalibration 兼容 corner-file 模式 | 100 | 需要 corner pkl、图像时间戳、IMU 数据 |
 | H5 模式 | 103 | 需要 images.h5、图像时间戳、IMU CSV |
 | 开启时间偏移估计 | 106 | wrapper 默认关闭 time offset 标定 |
-| 严格匹配 Production 参数 | 109 | 用于 Docker 与 Production 数值一致性验证 |
+| 严格匹配 Benchmark 参数 | 109 | 用于 Docker 与 Benchmark 数值一致性验证 |
 | verbose 调试 | 112 | 排查 IMU 激励、残差、时间偏移、优化失败 |
 | 快速预检 | 115 | 降低 max iter，只看趋势，不能替代正式结果 |
 | knot rate 提速实验 | 118 | 改变优化变量数量，必须和默认参数对比 |
@@ -103,7 +103,7 @@ tagSpacing: 0.3
 
 1. Docker forked Kalibr fast mode。
 2. Docker forked Kalibr stable mode。
-3. ProductionCalibration 仓库里的旧 cam-cam Kalibr。
+3. BenchmarkCalibration 仓库里的旧 cam-cam Kalibr。
 
 Docker forked Kalibr 已经加入：
 
@@ -118,14 +118,14 @@ Docker forked Kalibr 已经加入：
 - `Extracted corners for 20 images (of 20 images)`
 - `Fallback used: False`
 
-但是本地 ProductionCalibration 的 cam-cam Kalibr 代码还没有这个 `reopen()` 修复。如果直接运行旧 Production fast 路径，它仍可能出现多进程读 bag 丢图，导致提取图像数不同，结果自然不会严格一致。
+但是本地 BenchmarkCalibration 的 cam-cam Kalibr 代码还没有这个 `reopen()` 修复。如果直接运行旧 Benchmark fast 路径，它仍可能出现多进程读 bag 丢图，导致提取图像数不同，结果自然不会严格一致。
 
 要建立严格一致性基准，需要先做其中一件事：
 
-- 把 `reopen()` 修复同步回 ProductionCalibration。
-- 或者明确 ProductionCalibration 不再作为 cam-cam 执行入口，以 Docker fork 为唯一基准。
+- 把 `reopen()` 修复同步回 BenchmarkCalibration。
+- 或者明确 BenchmarkCalibration 不再作为 cam-cam 执行入口，以 Docker fork 为唯一基准。
 
-在这之前，对外描述应该是：Docker fast 模式已修复并通过当前数据验证；ProductionCalibration 项目版尚未同步该修复，所以两者不保证一致。
+在这之前，对外描述应该是：Docker fast 模式已修复并通过当前数据验证；BenchmarkCalibration 项目版尚未同步该修复，所以两者不保证一致。
 
 ## 为什么 fast auto 是默认推荐
 
@@ -155,4 +155,4 @@ tagSpacing: 0.3
 
 `tagSize` is in meters. `tagSpacing` is a ratio: spacing divided by tag size.
 
-Docker fast cam-cam has been fixed in this fork by reopening the rosbag in each multiprocessing worker. The local ProductionCalibration cam-cam copy has not been patched yet, so Docker fast and ProductionCalibration fast should not be claimed as strictly identical until that patch is synchronized or ProductionCalibration is retired as the execution path.
+Docker fast cam-cam has been fixed in this fork by reopening the rosbag in each multiprocessing worker. The local BenchmarkCalibration cam-cam copy has not been patched yet, so Docker fast and BenchmarkCalibration fast should not be claimed as strictly identical until that patch is synchronized or BenchmarkCalibration is retired as the execution path.

@@ -6,13 +6,13 @@ import cv2
 import os
 
 # 路径设置
-# image_bin_path = '/Users/wayne/Documents/work/data/ost_calibration/imu_to_vpcam/0_img_.bin'
-# hdf5_path = '/Users/wayne/Documents/work/data/ost_calibration/imu_to_vpcam/images.hdf5'
-# image_bin_path = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/2023-12-22-60fps-taurus-cam0/0_img_.bin'
-# hdf5_path = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/2023-12-22-60fps-taurus-640x400-cam0/0_img_.h5'
-# image_bin_path = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/20240103-60Hz-taurus-32_33-wearing-cam2imu_fast_shrink-1/1_img_.bin'
-# hdf5_path = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/20240103-60Hz-taurus-32_33-wearing-cam2imu_fast_shrink-1/1_img_640x400.h5'
-data_root = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/20240113-120_of_120Hz-mercury-1920x1200-32_33-naked-fix-cam2imu_fast-final-test10'
+# image_bin_path = '/ABS/benchmark/imu_to_camera/0_img_.bin'
+# hdf5_path = '/ABS/benchmark/imu_to_camera/images.hdf5'
+# image_bin_path = r'/ABS/benchmark/imu_to_camera/2023-12-22-60fps-taurus-cam0/0_img_.bin'
+# hdf5_path = r'/ABS/benchmark/imu_to_camera/2023-12-22-60fps-taurus-640x400-cam0/0_img_.h5'
+# image_bin_path = r'/ABS/benchmark/imu_to_camera/20240103-60Hz-taurus-32_33-wearing-cam2imu_fast_shrink-1/1_img_.bin'
+# hdf5_path = r'/ABS/benchmark/imu_to_camera/20240103-60Hz-taurus-32_33-wearing-cam2imu_fast_shrink-1/1_img_640x400.h5'
+data_root = r'/ABS/benchmark/imu_to_camera/20240113-120_of_120Hz-mercury-1920x1200-32_33-naked-fix-cam2imu_fast-final-test10'
 image_bin_path = os.path.join(data_root, '0_img_.bin')
 hdf5_path = os.path.join(data_root, '0_img_1920x1200.h5')
 

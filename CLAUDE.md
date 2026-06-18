@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **kalibr** (19823 symbols, 29657 relationships, 240 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **kalibr-docker** (19878 symbols, 29712 relationships, 240 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -24,10 +24,10 @@ This project is indexed by GitNexus as **kalibr** (19823 symbols, 29657 relation
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/kalibr/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/kalibr/clusters` | All functional areas |
-| `gitnexus://repo/kalibr/processes` | All execution flows |
-| `gitnexus://repo/kalibr/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/kalibr-docker/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/kalibr-docker/clusters` | All functional areas |
+| `gitnexus://repo/kalibr-docker/processes` | All execution flows |
+| `gitnexus://repo/kalibr-docker/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 

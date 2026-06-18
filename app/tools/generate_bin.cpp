@@ -37,7 +37,7 @@ std::vector<std::string> readImgNames(std::string root) {
 }
 
 int main() {
-    std::string root = "/media/psf/work/data/ost_calibration/imu_to_vpcam/2023-12-22-60fps-taurus-cam0/";
+    std::string root = "/ABS/benchmark/imu_to_camera/2023-12-22-60fps-taurus-cam0/";
     auto left = readImgNames(root);
     // auto right = readImgNames(root + "20231213-150fps-fast-morerotations-cam1/mav0/cam0/data/");
 

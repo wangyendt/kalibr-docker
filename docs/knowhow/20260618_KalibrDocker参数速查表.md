@@ -52,15 +52,15 @@
 | `--h5-timestamp-file` | 空 | H5 对应图像时间戳 | H5 模式三件套之一 |
 | `--imu-csv` | 空 | H5 模式 IMU CSV | H5 模式三件套之一 |
 | `--fixture-id` | `fixture` | corner-file 输出命名后缀 | 影响 Kalibr 结果文件名 |
-| `--trim-imu-edge-count` | 空 | 裁掉首尾 IMU 样本数 | production 对齐常用 `1000`，能避开 spline 边界 |
-| `--timeoffset-padding` | `0.03` | spline 时间边界 padding | ProductionCalibration 常用 `0.04` |
+| `--trim-imu-edge-count` | 空 | 裁掉首尾 IMU 样本数 | benchmark 对齐常用 `1000`，能避开 spline 边界 |
+| `--timeoffset-padding` | `0.03` | spline 时间边界 padding | BenchmarkCalibration 常用 `0.04` |
 | `--max-iter` | `30` | Kalibr 最大迭代数 | 太小可能未收敛，太大耗时 |
 | `--pose-knots-per-second` | `100` | pose spline knot rate | 越大轨迹更灵活、变量更多 |
 | `--bias-knots-per-second` | `50` | bias spline knot rate | 越大 bias 更灵活、变量更多 |
 | `--no-time-calibration` | 默认开启 | 禁用 time offset 标定 | 默认不估 time offset |
 | `--estimate-time-offset` | 关闭 | 开启 time offset 标定 | 会释放时间偏移自由度 |
 | `--export-poses` | 默认开启 | 导出优化后 pose | 输出更多结果文件 |
-| `--no-export-poses` | 关闭 | 不导出 pose | 对齐旧 ProductionCalibration 时常用 |
+| `--no-export-poses` | 关闭 | 不导出 pose | 对齐旧 BenchmarkCalibration 时常用 |
 | `--focal-length-init` | 空 | 设置 Kalibr 焦距初值 | 一般 cam-imu 不需要 |
 | `--verbose` | 关闭 | 流式打印 Kalibr 输出 | 调试失败时打开 |
 

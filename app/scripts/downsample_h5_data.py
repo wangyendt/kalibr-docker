@@ -7,8 +7,8 @@ import numpy as np
 import shutil
 import pandas as pd
 
-source_dir = '/media/psf/work/data/ost_calibration/imu_to_vpcam/20240113-120Hz-mercury-1920x1200-32_33-naked-fix-cam2imu_fast-final-test12'
-source_dir = '/media/psf/work/data/ost_calibration/imu_to_vpcam/20240113-120_of_120Hz-mercury-1920x1200-32_33-naked-fix-cam2imu_fast-final-test10'
+source_dir = '/ABS/benchmark/imu_to_camera/20240113-120Hz-mercury-1920x1200-32_33-naked-fix-cam2imu_fast-final-test12'
+source_dir = '/ABS/benchmark/imu_to_camera/20240113-120_of_120Hz-mercury-1920x1200-32_33-naked-fix-cam2imu_fast-final-test10'
 source_freq = re.findall('-(.*?)_of.*?Hz-', os.path.basename(source_dir))[0]
 # print(source_freq)
 target_freq = [30, 60, 90, 120, 150]

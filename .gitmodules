@@ -1,3 +1,3 @@
 [submodule "kalibr-camimu-ceres"]
 	path = kalibr-camimu-ceres
-	url = file:///Users/wayne/Documents/work/code/project/ffalcon/kalibr-camimu-ceres
+	url = ../kalibr-camimu-ceres.git

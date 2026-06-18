@@ -120,7 +120,7 @@ docker run --rm \
     --output /output
 ```
 
-Pre-extracted corner file plus IMU data, compatible with the ProductionCalibration
+Pre-extracted corner file plus IMU data, compatible with the BenchmarkCalibration
 corner-file path:
 
 ```bash
@@ -149,4 +149,4 @@ stay read-only while Kalibr writes its result files.
 `--max-iter 30`, `--pose-knots-per-second 100`, and
 `--bias-knots-per-second 50`. Lower values can speed up screening runs, but they
 change the optimizer problem and should be compared against the default result
-before being used in production.
+before being used for deployment or benchmark reporting.

@@ -136,7 +136,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "quality_unknown": "Calibration quality could not be evaluated.",
         "quality_ok": "No obvious calibration-quality issue was detected.",
         "quality_warning": "The calibration may be usable but has risks; add data according to the warnings and retest.",
-        "quality_error": "The calibration has high risk and should not be used directly in production.",
+        "quality_error": "The calibration has high risk and should not be used directly for deployment or benchmark reporting.",
         "high_reprojection": "The reprojection error is high.",
         "high_reprojection_fix": "Add sharp images covering corners, edges, center, distances, and target poses; check target size and camera model.",
         "focal_asymmetry": "fx/fy asymmetry is high.",

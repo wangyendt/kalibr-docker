@@ -5,9 +5,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 
-image_bin_path = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/2023-12-21-taurus-30fps-success-1-cam0/0_img_.bin'
-image_bin_path = r'/media/psf/work/data/ost_calibration/imu_to_vpcam/20240104-30Hz-taurus-32_33-wearing-cam2imu_fast_shrink-test1/0_img_.bin'
-# image_bin_path = r'/Users/wayne/Documents/work/data/ost_calibration/imu_to_vpcam/0_img_.bin'
+image_bin_path = r'/ABS/benchmark/imu_to_camera/2023-12-21-taurus-30fps-success-1-cam0/0_img_.bin'
+image_bin_path = r'/ABS/benchmark/imu_to_camera/20240104-30Hz-taurus-32_33-wearing-cam2imu_fast_shrink-test1/0_img_.bin'
+# image_bin_path = r'/ABS/benchmark/imu_to_camera/0_img_.bin'
 
 w, h, c = 640, 400, 1
 sz = w * h * c

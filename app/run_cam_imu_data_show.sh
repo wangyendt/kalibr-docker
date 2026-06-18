@@ -1,8 +1,8 @@
-dataset_root=${1:-/media/psf/work/code/project/ffalcon/production_calibration/data/2024_01_01_00_00_00/cam_imu}
-kalibr_dir=${2:-/media/psf/work/code/project/ffalcon/production_calibration/module/cam_imu}
+dataset_root=${1:-/data/benchmark_calibration/data/2024_01_01_00_00_00/cam_imu}
+kalibr_dir=${2:-/data/benchmark_calibration/module/cam_imu}
 fixture_id=$3
 config_yaml_file=$4
-# kalibr_dir=/home/wayne/work/code/catkin_wss/kalibr_ws
+# kalibr_dir=/opt/kalibr_ws
 
 echo $dataset_root
 echo $kalibr_dir

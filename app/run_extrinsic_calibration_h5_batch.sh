@@ -1,5 +1,5 @@
-kalibr_dir=/home/wayne/work/code/catkin_wss/kalibr_ws
-for dataset_root in /media/psf/work/data/ost_calibration/imu_to_vpcam/*; do
+kalibr_dir=/opt/kalibr_ws
+for dataset_root in /ABS/benchmark/imu_to_camera/*; do
     if [ -d "$dataset_root" ]; then
         echo "processing $dataset_root"
         device=mercury
