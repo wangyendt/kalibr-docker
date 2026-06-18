@@ -24,11 +24,11 @@ docker save kalibr-camera-calibration:20.04 -o kalibr-camera-calibration_20.04.t
 说明：导入离线镜像。
 docker load -i kalibr-camera-calibration_20.04.tar
 
-说明：给 DockerHub 打发布标签；把 wangyendt 换成自己的 DockerHub namespace。
-docker tag kalibr-camera-calibration:20.04 wangyendt/kalibr-camera-calibration:20.04
+说明：给 DockerHub 打发布标签；当前公开 DockerHub namespace 是 wang121ye。
+docker tag kalibr-camera-calibration:20.04 wang121ye/kalibr-camera-calibration:20.04
 
 说明：推送到 DockerHub；适合公开仓库的一键部署，外部用户不需要本地 build。
-docker push wangyendt/kalibr-camera-calibration:20.04
+docker push wang121ye/kalibr-camera-calibration:20.04
 
 说明：给 GHCR 打发布标签；GitHub 仓库发布时也可以用这个命名。
 docker tag kalibr-camera-calibration:20.04 ghcr.io/wangyendt/kalibr-camera-calibration:20.04
@@ -37,7 +37,7 @@ docker tag kalibr-camera-calibration:20.04 ghcr.io/wangyendt/kalibr-camera-calib
 docker push ghcr.io/wangyendt/kalibr-camera-calibration:20.04
 
 说明：外部用户从 DockerHub 拉取并查看帮助。
-docker pull wangyendt/kalibr-camera-calibration:20.04 && docker run --rm wangyendt/kalibr-camera-calibration:20.04 --help
+docker pull wang121ye/kalibr-camera-calibration:20.04 && docker run --rm wang121ye/kalibr-camera-calibration:20.04 --help
 
 说明：外部用户从 GHCR 拉取并查看帮助。
 docker pull ghcr.io/wangyendt/kalibr-camera-calibration:20.04 && docker run --rm ghcr.io/wangyendt/kalibr-camera-calibration:20.04 --help

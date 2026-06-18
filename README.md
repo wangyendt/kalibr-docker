@@ -19,8 +19,8 @@
 
 ```bash
 # 推荐给普通用户：直接拉公开镜像，镜像名发布后替换为你的真实 namespace。
-docker pull wangyendt/kalibr-camera-calibration:20.04
-docker run --rm wangyendt/kalibr-camera-calibration:20.04 --help
+docker pull wang121ye/kalibr-camera-calibration:20.04
+docker run --rm wang121ye/kalibr-camera-calibration:20.04 --help
 
 # 开发者或私有环境：从源码本地构建。
 docker build -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04 .
@@ -85,8 +85,8 @@ Core commands:
 
 ```bash
 # Public delivery: publish a prebuilt image, then users only pull and run.
-docker pull wangyendt/kalibr-camera-calibration:20.04
-docker run --rm wangyendt/kalibr-camera-calibration:20.04 --help
+docker pull wang121ye/kalibr-camera-calibration:20.04
+docker run --rm wang121ye/kalibr-camera-calibration:20.04 --help
 
 # Developer fallback: build locally from source.
 docker build -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04 .

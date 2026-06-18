@@ -8,9 +8,9 @@
 
 | 命令 | 用途 | 影响 |
 |---|---|---|
-| `docker pull wangyendt/kalibr-camera-calibration:20.04` | 拉取公开镜像 | 推荐给外部用户，一键部署，不在本机编译 ROS/Kalibr |
+| `docker pull wang121ye/kalibr-camera-calibration:20.04` | 拉取公开镜像 | 推荐给外部用户，一键部署，不在本机编译 ROS/Kalibr |
 | `docker build -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04 .` | 构建本地镜像 | 适合开发、改 Dockerfile、私有依赖或无法访问镜像仓库时使用 |
-| `docker push wangyendt/kalibr-camera-calibration:20.04` | 发布 DockerHub 镜像 | 公开交付最直接；GHCR 可用 `ghcr.io/<user>/kalibr-camera-calibration:20.04` 同步发布 |
+| `docker push wang121ye/kalibr-camera-calibration:20.04` | 发布 DockerHub 镜像 | 公开交付最直接；GHCR 可用 `ghcr.io/<user>/kalibr-camera-calibration:20.04` 同步发布 |
 | `docker run --rm kalibr-camera-calibration:20.04 --help` | 查看总入口 | 验证镜像可用 |
 | `docker run --rm kalibr-camera-calibration:20.04 cam-cam --help` | 查看 cam-cam 参数 | 只覆盖相机/多相机标定 |
 | `docker run --rm kalibr-camera-calibration:20.04 cam-imu --help` | 查看 cam-imu 参数 | 只覆盖 IMU-camera 标定 |
