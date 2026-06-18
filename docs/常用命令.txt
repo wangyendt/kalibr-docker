@@ -6,8 +6,23 @@
 Docker 镜像构建、检查、清理
 ======================================================================
 
-说明：构建本项目 Ubuntu 20.04 / ROS Noetic / Kalibr Docker 镜像。
+说明：默认构建本项目 Ubuntu 20.04 / ROS Noetic / Kalibr amd64 镜像；Dockerfile 默认使用 osrf/ros:noetic-desktop-full 和 linux/amd64。
 docker build -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04 .
+
+说明：显式用 buildx 构建 Ubuntu 20.04 / ROS Noetic amd64 镜像；等价于默认构建，但平台和基础镜像写死，适合发布前复现。
+docker buildx build --platform linux/amd64 --build-arg BASE_IMAGE_PLATFORM=linux/amd64 --build-arg BASE_IMAGE=osrf/ros:noetic-desktop-full -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04-amd64 --load .
+
+说明：检查默认 ROS Noetic desktop-full 基础镜像实际架构；当前该 tag 是 amd64 单架构，不是 multi-arch。
+docker buildx imagetools inspect --format '{{json .Image.Architecture}}' osrf/ros:noetic-desktop-full
+
+说明：检查 arm64 可用的 ROS Noetic perception 基础镜像；它基于 Ubuntu 20.04/focal，可作为 arm64 探索构建起点。
+docker buildx imagetools inspect arm64v8/ros:noetic-perception
+
+说明：原生构建 Ubuntu 20.04 / ROS Noetic arm64 镜像（已验证可用）；arm64 不存在 desktop-full，用 arm64v8/ros:noetic-perception 替代，并把 apt 源换成清华 ubuntu-ports 镜像绕过 ports.ubuntu.com 不稳定。在 Apple Silicon 上原生跑，比 amd64 模拟快约 50%。
+docker buildx build --platform linux/arm64 --build-arg BASE_IMAGE_PLATFORM=linux/arm64 --build-arg BASE_IMAGE=arm64v8/ros:noetic-perception --build-arg APT_MIRROR_HOST=mirrors.tuna.tsinghua.edu.cn -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04-arm64 --load .
+
+说明：运行 arm64 镜像帮助页做冒烟测试；只在上一条 build 成功后执行。
+docker run --rm --platform linux/arm64 kalibr-camera-calibration:20.04-arm64 --help
 
 说明：查看本机是否已有标定镜像。
 docker images kalibr-camera-calibration:20.04

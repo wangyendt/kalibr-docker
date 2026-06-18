@@ -1,5 +1,6 @@
 ARG BASE_IMAGE_PLATFORM=linux/amd64
-FROM --platform=${BASE_IMAGE_PLATFORM} osrf/ros:noetic-desktop-full
+ARG BASE_IMAGE=osrf/ros:noetic-desktop-full
+FROM --platform=${BASE_IMAGE_PLATFORM} ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-c"]
 
@@ -11,6 +12,15 @@ ENV MPLBACKEND=Agg
 
 ARG VIO_COMMON_REPO=https://github.com/JzHuai0108/vio_common.git
 ARG VIO_COMMON_REF=
+
+# Optional apt mirror host. Empty by default (no change). Set e.g.
+# APT_MIRROR_HOST=mirrors.tuna.tsinghua.edu.cn to swap ports/archive/security
+# Ubuntu hosts for a faster/more reliable mirror (e.g. for native arm64 builds
+# where ports.ubuntu.com is slow). The path (ubuntu-ports / ubuntu) is preserved.
+ARG APT_MIRROR_HOST=
+RUN if [[ -n "${APT_MIRROR_HOST}" ]]; then \
+      sed -i -E "s@http://(ports|archive|security)\.ubuntu\.com@http://${APT_MIRROR_HOST}@g" /etc/apt/sources.list; \
+    fi
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     autoconf \
