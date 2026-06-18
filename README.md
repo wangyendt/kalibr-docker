@@ -9,12 +9,20 @@
 | 能力 | 输入 | 输出 |
 |---|---|---|
 | `cam-cam` | 单相机图片、单视频、`cam0/cam1/...` 多相机图片目录 + AprilGrid YAML | Kalibr camchain、FOV、Markdown/JSON 诊断报告 |
-| `cam-imu` | camchain、IMU YAML、corner-file 或 H5、图像时间戳、IMU CSV | Kalibr IMU-camera 标定结果、日志、报告 |
-| 批量/离线交付 | Docker image tar 或本地 build | 任意装了 Docker 的机器一键运行 |
+| `cam-imu` wrapper | 多相机 camchain、一个或多个 IMU YAML、bag，或 corner-file/H5 + 每个 IMU 一份 CSV | Kalibr IMU-camera 标定结果、日志、报告 |
+| 原始 Kalibr CLI | ROS bag、camchain、一个或多个 IMU YAML | 低层调试和复刻官方命令 |
+| 批量/离线交付 | DockerHub/GHCR 镜像、Docker image tar 或本地 build | 任意装了 Docker 的机器一键运行 |
 
 ## 快速开始
 
+最省事的公开交付方式是发布预构建镜像到 DockerHub 或 GHCR。用户只需要 `docker pull`，不需要在本机编译 ROS/Kalibr；本地 build 更适合开发者调试或私有 fork。
+
 ```bash
+# 推荐给普通用户：直接拉公开镜像，镜像名发布后替换为你的真实 namespace。
+docker pull wangyendt/kalibr-camera-calibration:20.04
+docker run --rm wangyendt/kalibr-camera-calibration:20.04 --help
+
+# 开发者或私有环境：从源码本地构建。
 docker build -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04 .
 docker run --rm kalibr-camera-calibration:20.04 --help
 ```
@@ -31,13 +39,20 @@ BenchmarkCalibration 兼容的 cam-IMU corner-file 模式：
 docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output:/output kalibr-camera-calibration:20.04 cam-imu --target /data/aprilgrid.yaml --cam-chain /data/camchain.yaml --imu-yaml /data/imu.yaml --corner-file /data/corners.pkl --image-timestamp-file /data/image_timestamps.txt --imu-data-file /data/imu.csv --fixture-id 1 --trim-imu-edge-count 1000 --timeoffset-padding 0.04 --output /output --lang zh
 ```
 
+## 当前支持的输入
+
+- `cam-cam` wrapper：图片目录、单视频、单张图片、`cam0/cam1/...` 多相机图片目录；多相机要求每路图片数量一致并按文件名自然排序同步。
+- `cam-imu` wrapper：多相机 camchain、一个或多个 `--imu-yaml`、`--bag`，或 corner-file/H5 + 图像时间戳 + 每个 IMU 一份 CSV；这是离线标定入口，不是直接吃图片目录的入口。
+- 原始 Kalibr CLI：镜像里仍可直接运行 `rosrun kalibr ...`，用于低层调试、复刻官方命令或检查 wrapper 生成的命令。
+- 当前 wrapper 不做多相机视频同步；没有外部时间戳时无法判断多个视频之间的同步关系。
+
 ## 为什么这个 fork 更适合交付
 
 - Docker 内置 Ubuntu 20.04 / ROS Noetic / Kalibr / `vio_common`，环境固定。
 - `cam-cam` 会自动整理图片/视频、生成 bag、跑 Kalibr、输出报告。
 - 支持 `--fast-extraction auto`：优先多进程提角点，遇到 rosbag 并发读取异常自动回退单线程。
 - 报告里直接给 warning/error、补拍建议、每个 pinhole 相机的 `hfov/vfov/dfov`。
-- `cam-imu` 保留 corner-file 与 H5 两条离线路径，能对齐 BenchmarkCalibration 的常用参数。
+- `cam-imu` 支持 bag、corner-file、H5 三种输入；多 IMU 时每个 IMU YAML 对应 bag topic 或一份 IMU CSV。
 
 ## Ceres Cam-IMU 子工程
 
@@ -69,11 +84,17 @@ Kalibr OneShot Docker is a delivery-focused Kalibr fork. It wraps `cam-cam` and 
 Core commands:
 
 ```bash
+# Public delivery: publish a prebuilt image, then users only pull and run.
+docker pull wangyendt/kalibr-camera-calibration:20.04
+docker run --rm wangyendt/kalibr-camera-calibration:20.04 --help
+
+# Developer fallback: build locally from source.
 docker build -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04 .
-docker run --rm kalibr-camera-calibration:20.04 --help
 docker run --rm kalibr-camera-calibration:20.04 cam-cam --help
 docker run --rm kalibr-camera-calibration:20.04 cam-imu --help
 ```
+
+Supported inputs: the wrapper handles image folders, one video, multi-camera image folders, and offline cam-IMU bag/corner-file/H5 inputs. `cam-imu` accepts multiple IMU YAMLs; bag mode reads the topics from those YAMLs, and corner-file/H5 modes take one IMU CSV per IMU.
 
 What this fork adds:
 

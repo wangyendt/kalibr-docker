@@ -105,6 +105,28 @@ def _stage_input_file(src: Path, work_dir: Path) -> Path:
     return dst
 
 
+def _stage_input_files(srcs: Sequence[Path], work_dir: Path, subdir: str) -> List[Path]:
+    staged_dir = work_dir / subdir
+    staged: List[Path] = []
+    for index, src in enumerate(srcs):
+        if src is None:
+            raise CalibrationError("Internal error: cannot stage an empty cam-imu input path.")
+        if not src.exists():
+            raise CalibrationError(f"Input file does not exist: {src}")
+        staged_dir.mkdir(parents=True, exist_ok=True)
+        dst = staged_dir / f"{index}_{src.name}"
+        if dst.exists() or dst.is_symlink():
+            if dst.is_dir():
+                raise CalibrationError(f"Cannot stage input over directory: {dst}")
+            dst.unlink()
+        try:
+            dst.symlink_to(src)
+        except OSError:
+            shutil.copy2(str(src), str(dst))
+        staged.append(dst)
+    return staged
+
+
 def create_bag(dataset_root: Path, output_bag: Path, log_path: Path, stream: bool = False) -> CommandResult:
     bagcreator = find_vio_common_bagcreator()
     command = [
@@ -208,13 +230,15 @@ def detect_cam_cam_fast_extraction_failure(log_path: Path) -> Tuple[bool, str]:
 def run_cam_imu(
     target_yaml: Path,
     cam_chain: Path,
-    imu_yaml: Path,
+    imu_yamls: Sequence[Path],
+    imu_models: Sequence[str],
+    bag_file: Optional[Path],
     h5_file: Optional[Path],
     h5_timestamp_file: Optional[Path],
-    imu_csv: Optional[Path],
+    imu_csv_files: Optional[Sequence[Path]],
     corner_file: Optional[Path],
     image_timestamp_file: Optional[Path],
-    imu_data_file: Optional[Path],
+    imu_data_files: Optional[Sequence[Path]],
     fixture_id: str,
     trim_imu_edge_count: Optional[int],
     output_dir: Path,
@@ -224,22 +248,34 @@ def run_cam_imu(
     bias_knots_per_second: int,
     no_time_calibration: bool,
     export_poses: bool,
+    estimate_imu_delay: bool,
     focal_length_init: Optional[float],
     log_path: Path,
     stream: bool = False,
 ) -> CommandResult:
+    if not imu_yamls:
+        raise CalibrationError("cam-imu requires at least one IMU YAML.")
+    if len(imu_models) != len(imu_yamls):
+        raise CalibrationError(f"Expected {len(imu_yamls)} IMU models, got {len(imu_models)}.")
+    if corner_file is not None and len(imu_data_files or []) != len(imu_yamls):
+        raise CalibrationError(f"Expected {len(imu_yamls)} --imu-data-file inputs, got {len(imu_data_files or [])}.")
+    if h5_file is not None and len(imu_csv_files or []) != len(imu_yamls):
+        raise CalibrationError(f"Expected {len(imu_yamls)} --imu-csv inputs, got {len(imu_csv_files or [])}.")
+
     work_dir = output_dir / "work_cam_imu"
     target_yaml = _stage_input_file(target_yaml, work_dir)
     cam_chain = _stage_input_file(cam_chain, work_dir)
-    imu_yaml = _stage_input_file(imu_yaml, work_dir)
-    if corner_file is not None:
+    imu_yamls = _stage_input_files(imu_yamls, work_dir, "imus")
+    if bag_file is not None:
+        bag_file = _stage_input_file(bag_file, work_dir)
+    elif corner_file is not None:
         corner_file = _stage_input_file(corner_file, work_dir)
         image_timestamp_file = _stage_input_file(image_timestamp_file, work_dir)
-        imu_data_file = _stage_input_file(imu_data_file, work_dir)
+        imu_data_files = _stage_input_files(imu_data_files or [], work_dir, "imu_data")
     else:
         h5_file = _stage_input_file(h5_file, work_dir)
         h5_timestamp_file = _stage_input_file(h5_timestamp_file, work_dir)
-        imu_csv = _stage_input_file(imu_csv, work_dir)
+        imu_csv_files = _stage_input_files(imu_csv_files or [], work_dir, "imu_csv")
 
     command = [
         "rosrun",
@@ -250,7 +286,9 @@ def run_cam_imu(
         "--cams",
         str(cam_chain),
         "--imu",
-        str(imu_yaml),
+    ] + [str(path) for path in imu_yamls] + [
+        "--imu-models",
+    ] + list(imu_models) + [
         "--timeoffset-padding",
         str(timeoffset_padding),
         "--max-iter",
@@ -261,19 +299,19 @@ def run_cam_imu(
         str(bias_knots_per_second),
         "--dont-show-report",
     ]
-    if corner_file is not None:
+    if bag_file is not None:
+        command.extend(["--bag", str(bag_file)])
+    elif corner_file is not None:
         command.extend([
             "--corner_file",
             str(corner_file),
             "--image_timestamp_file",
             str(image_timestamp_file),
             "--imu_data_file",
-            str(imu_data_file),
+        ] + [str(path) for path in (imu_data_files or [])] + [
             "--fixture_id",
             fixture_id,
         ])
-        if trim_imu_edge_count is not None:
-            command.extend(["--trim-imu-edge-count", str(trim_imu_edge_count)])
     else:
         command.extend([
             "--h5file",
@@ -281,10 +319,11 @@ def run_cam_imu(
             "--h5timestampfile",
             str(h5_timestamp_file),
             "--imufile",
-            str(imu_csv),
-        ])
-        if trim_imu_edge_count is not None:
-            command.extend(["--trim-imu-edge-count", str(trim_imu_edge_count)])
+        ] + [str(path) for path in (imu_csv_files or [])])
+    if trim_imu_edge_count is not None:
+        command.extend(["--trim-imu-edge-count", str(trim_imu_edge_count)])
+    if estimate_imu_delay:
+        command.append("--imu-delay-by-correlation")
     if no_time_calibration:
         command.append("--no-time-calibration")
     if export_poses:

@@ -24,6 +24,24 @@ docker save kalibr-camera-calibration:20.04 -o kalibr-camera-calibration_20.04.t
 说明：导入离线镜像。
 docker load -i kalibr-camera-calibration_20.04.tar
 
+说明：给 DockerHub 打发布标签；把 wangyendt 换成自己的 DockerHub namespace。
+docker tag kalibr-camera-calibration:20.04 wangyendt/kalibr-camera-calibration:20.04
+
+说明：推送到 DockerHub；适合公开仓库的一键部署，外部用户不需要本地 build。
+docker push wangyendt/kalibr-camera-calibration:20.04
+
+说明：给 GHCR 打发布标签；GitHub 仓库发布时也可以用这个命名。
+docker tag kalibr-camera-calibration:20.04 ghcr.io/wangyendt/kalibr-camera-calibration:20.04
+
+说明：推送到 GHCR；需要先 docker login ghcr.io。
+docker push ghcr.io/wangyendt/kalibr-camera-calibration:20.04
+
+说明：外部用户从 DockerHub 拉取并查看帮助。
+docker pull wangyendt/kalibr-camera-calibration:20.04 && docker run --rm wangyendt/kalibr-camera-calibration:20.04 --help
+
+说明：外部用户从 GHCR 拉取并查看帮助。
+docker pull ghcr.io/wangyendt/kalibr-camera-calibration:20.04 && docker run --rm ghcr.io/wangyendt/kalibr-camera-calibration:20.04 --help
+
 ======================================================================
 帮助与通用入口
 ======================================================================
@@ -39,6 +57,15 @@ docker run --rm kalibr-camera-calibration:20.04 cam-imu --help
 
 说明：初始化 Ceres Cam-IMU 子模块；如果没有走 submodule，可改用下一条 git clone。
 git submodule update --init --recursive kalibr-camimu-ceres
+
+说明：更新 Ceres Cam-IMU 子模块到 .gitmodules 配置的 master 最新提交。
+git submodule update --remote --merge kalibr-camimu-ceres
+
+说明：查看 Ceres Cam-IMU 子模块当前提交和工作区状态。
+git -C kalibr-camimu-ceres log -1 --oneline && git -C kalibr-camimu-ceres status --short --branch
+
+说明：更新子模块后，在 kalibr-docker 主仓库提交新的 submodule 指针。
+git add .gitmodules kalibr-camimu-ceres && git commit -m "Update kalibr-camimu-ceres submodule"
 
 说明：没有 submodule 时，在当前仓库根目录克隆新 Ceres 工程。
 git clone ../kalibr-camimu-ceres kalibr-camimu-ceres
@@ -59,8 +86,13 @@ docker run --rm -v /ABS/images:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro 
 说明：单相机视频标定。
 docker run --rm -v /ABS/video.mp4:/input/video.mp4:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output:/output kalibr-camera-calibration:20.04 cam-cam --input /input/video.mp4 --target /target.yaml --output /output --lang zh --video-sample-fps 4
 
-说明：双相机图片文件夹标定。
+说明：双相机图片文件夹标定；输入目录需要包含 /ABS/multi_cam_input/cam0 和 /ABS/multi_cam_input/cam1。
 docker run --rm -v /ABS/multi_cam_input:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --models pinhole-radtan,pinhole-radtan --lang zh
+
+说明：三相机图片文件夹标定；N 相机时继续增加 cam3、cam4，并让 --models 的数量等于相机数。
+docker run --rm -v /ABS/tri_cam_input:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output_tri:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --models pinhole-radtan,pinhole-radtan,pinhole-radtan --lang zh
+
+说明：多相机 wrapper 只支持图片子目录，不支持多个视频自动同步；没有外部时间戳时无法判断视频间同步关系。
 
 说明：只整理数据和做诊断，不运行 Kalibr。
 docker run --rm -v /ABS/images:/input:ro -v /ABS/april_6x6.yaml:/target.yaml:ro -v /ABS/output_dryrun:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --skip-kalibr --verbose --lang zh
@@ -74,6 +106,45 @@ docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output_cam_imu:/output kal
 
 说明：Kalibr Docker cam-imu 开启时间偏移估计。
 docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output_cam_imu_time:/output kalibr-camera-calibration:20.04 cam-imu --target /data/aprilgrid.yaml --cam-chain /data/camchain.yaml --imu-yaml /data/imu.yaml --corner-file /data/corners.pkl --image-timestamp-file /data/image_timestamps.txt --imu-data-file /data/imu.csv --fixture-id 1 --trim-imu-edge-count 1000 --estimate-time-offset --timeoffset-padding 0.04 --output /output --lang zh
+
+说明：多相机 + 多 IMU bag 模式；camchain 可包含 cam0/cam1/...，imu0.yaml 是参考 IMU，各 IMU YAML 内的 rostopic 必须对应 bag 内 topic。
+docker run --rm --platform linux/amd64 -v /ABS/dataset.bag:/data/dataset.bag:ro -v /ABS/camchain.yaml:/data/camchain.yaml:ro -v /ABS/imu0.yaml:/data/imu0.yaml:ro -v /ABS/imu1.yaml:/data/imu1.yaml:ro -v /ABS/aprilgrid.yaml:/data/aprilgrid.yaml:ro -v /ABS/output_multi_cam_multi_imu:/output kalibr-camera-calibration:20.04 cam-imu --bag /data/dataset.bag --target /data/aprilgrid.yaml --cam-chain /data/camchain.yaml --imu-yaml /data/imu0.yaml /data/imu1.yaml --imu-models calibrated calibrated --imu-delay-by-correlation --timeoffset-padding 0.03 --output /output --lang zh
+
+说明：多相机 + 多 IMU H5 模式；每个 --imu-yaml 必须对应一份 --imu-csv，顺序一一对应。
+docker run --rm --platform linux/amd64 -v /ABS/cam_imu_h5:/data:ro -v /ABS/output_h5_multi_imu:/output kalibr-camera-calibration:20.04 cam-imu --target /data/aprilgrid.yaml --cam-chain /data/camchain.yaml --imu-yaml /data/imu0.yaml /data/imu1.yaml --imu-models calibrated calibrated --h5-file /data/images.h5 --h5-timestamp-file /data/image_timestamps.txt --imu-csv /data/imu0.csv /data/imu1.csv --output /output --lang zh
+
+说明：多相机 + 多 IMU corner-file 模式；每个 --imu-yaml 必须对应一份 --imu-data-file，顺序一一对应。
+docker run --rm --platform linux/amd64 -v /ABS/cam_imu_corners:/data:ro -v /ABS/output_corner_multi_imu:/output kalibr-camera-calibration:20.04 cam-imu --target /data/aprilgrid.yaml --cam-chain /data/camchain.yaml --imu-yaml /data/imu0.yaml /data/imu1.yaml --imu-models calibrated calibrated --corner-file /data/corners.pkl --image-timestamp-file /data/image_timestamps.txt --imu-data-file /data/imu0.csv /data/imu1.csv --fixture-id multi_imu --output /output --lang zh
+
+======================================================================
+TUM 双目数据集：bag 与 EuRoC/mav0 目录
+======================================================================
+
+说明：下面命令固定使用本机 TUM 根目录 /Users/wayne/Documents/work/data/TUM；bag 示例是 dataset-calib-imu1_512_16.bag，目录示例是 dataset-calib-imu2_512_16。camchain、imu、target 默认分别使用 dataset-calib-imu2_512_16/dso/camchain.yaml、dataset-calib-imu2_512_16/dso/imu_config.yaml、april_6x6_80x80cm.yaml；如果文件名不同，只替换路径。
+
+说明：TUM bag 格式 cam-cam；直接调用镜像内原始 Kalibr CLI，输出写入 /tmp/kalibr_tum_imu1_camcam。
+docker run --rm --platform linux/amd64 -v /Users/wayne/Documents/work/data/TUM:/data:ro -v /tmp/kalibr_tum_imu1_camcam:/output kalibr-camera-calibration:20.04 /bin/bash -lc "cd /output && rosrun kalibr kalibr_calibrate_cameras --bag /data/dataset-calib-imu1_512_16.bag --topics /cam0/image_raw /cam1/image_raw --models pinhole-equi pinhole-equi --target /data/april_6x6_80x80cm.yaml --dont-show-report"
+
+说明：TUM bag 格式 cam-imu；使用 Docker wrapper，输出写入 /tmp/kalibr_tum_imu1_camimu。
+docker run --rm --platform linux/amd64 -v /Users/wayne/Documents/work/data/TUM:/data:ro -v /tmp/kalibr_tum_imu1_camimu:/output kalibr-camera-calibration:20.04 cam-imu --bag /data/dataset-calib-imu1_512_16.bag --target /data/april_6x6_80x80cm.yaml --cam-chain /data/dataset-calib-imu2_512_16/dso/camchain.yaml --imu-yaml /data/dataset-calib-imu2_512_16/dso/imu_config.yaml --imu-models calibrated --timeoffset-padding 0.03 --output /output --lang zh
+
+说明：TUM bag 多 IMU 写法示例；TUM 示例本身通常是单 IMU，这条展示 wrapper 的多个 IMU YAML 形态，路径按你的 bag topic/yaml 替换。
+docker run --rm --platform linux/amd64 -v /Users/wayne/Documents/work/data/TUM:/data:ro -v /tmp/kalibr_tum_multi_imu:/output kalibr-camera-calibration:20.04 cam-imu --bag /data/dataset-calib-imu1_512_16.bag --target /data/april_6x6_80x80cm.yaml --cam-chain /data/dataset-calib-imu2_512_16/dso/camchain.yaml --imu-yaml /data/imu0.yaml /data/imu1.yaml --imu-models calibrated calibrated --imu-delay-by-correlation --timeoffset-padding 0.03 --output /output --lang zh
+
+说明：TUM EuRoC/mav0 目录格式 cam-cam；先把 cam0/data、cam1/data 软链接成 wrapper 支持的 cam0、cam1 结构，再跑 Docker wrapper。
+rm -rf /tmp/tum_imu2_camcam_input && mkdir -p /tmp/tum_imu2_camcam_input && ln -s /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16/mav0/cam0/data /tmp/tum_imu2_camcam_input/cam0 && ln -s /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16/mav0/cam1/data /tmp/tum_imu2_camcam_input/cam1 && docker run --rm --platform linux/amd64 -v /tmp/tum_imu2_camcam_input:/input:ro -v /Users/wayne/Documents/work/data/TUM/april_6x6_80x80cm.yaml:/target.yaml:ro -v /tmp/kalibr_tum_imu2_camcam:/output kalibr-camera-calibration:20.04 cam-cam --input /input --target /target.yaml --output /output --models pinhole-equi,pinhole-equi --lang zh
+
+说明：TUM EuRoC/mav0 目录格式 cam-imu 第一步；用 Ceres 子模块工具把目录转成 Kalibr bag 和 Ceres CSV，输出写入 /tmp/kalibr_tum_imu2_euroc。
+python3 kalibr-camimu-ceres/tools/prepare_ceres_inputs.py --source-type euroc --euroc-dir /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16 --cams /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16/dso/camchain.yaml --imu /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16/dso/imu_config.yaml --target /Users/wayne/Documents/work/data/TUM/april_6x6_80x80cm.yaml --out-dir /tmp/kalibr_tum_imu2_euroc --output-bag tum_imu2_euroc.bag
+
+说明：TUM EuRoC/mav0 目录格式 cam-imu 第二步；复用上一步生成的 bag 跑 Kalibr Docker wrapper。
+docker run --rm --platform linux/amd64 -v /tmp/kalibr_tum_imu2_euroc:/data:ro -v /Users/wayne/Documents/work/data/TUM:/cfg:ro -v /tmp/kalibr_tum_imu2_camimu:/output kalibr-camera-calibration:20.04 cam-imu --bag /data/tum_imu2_euroc.bag --target /cfg/april_6x6_80x80cm.yaml --cam-chain /cfg/dataset-calib-imu2_512_16/dso/camchain.yaml --imu-yaml /cfg/dataset-calib-imu2_512_16/dso/imu_config.yaml --timeoffset-padding 0.03 --output /output --lang zh
+
+说明：TUM bag 格式 Ceres cam-imu；从 bag 导出角点/IMU CSV 后运行单阶段 Ceres。
+python3 kalibr-camimu-ceres/tools/prepare_ceres_inputs.py --source-type bag --bag /Users/wayne/Documents/work/data/TUM/dataset-calib-imu1_512_16.bag --cams /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16/dso/camchain.yaml --imu /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16/dso/imu_config.yaml --target /Users/wayne/Documents/work/data/TUM/april_6x6_80x80cm.yaml --out-dir /tmp/ceres_tum_imu1_bag --run-calibration -- --imu-model scale-misalignment --max-iterations 100
+
+说明：TUM EuRoC/mav0 目录格式 Ceres cam-imu；从目录生成 bag/CSV 后运行单阶段 Ceres。
+python3 kalibr-camimu-ceres/tools/prepare_ceres_inputs.py --source-type euroc --euroc-dir /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16 --cams /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16/dso/camchain.yaml --imu /Users/wayne/Documents/work/data/TUM/dataset-calib-imu2_512_16/dso/imu_config.yaml --target /Users/wayne/Documents/work/data/TUM/april_6x6_80x80cm.yaml --out-dir /tmp/ceres_tum_imu2_euroc --run-calibration -- --imu-model scale-misalignment --init-from-camchain --max-iterations 100
 
 ======================================================================
 benchmark_calibration 单数据集三步命令

@@ -103,7 +103,7 @@ preventing silent partial-image calibration results.
 
 ## Camera-IMU one-line examples
 
-H5 image stream plus IMU CSV:
+H5 image stream plus one or more IMU CSV files:
 
 ```bash
 docker run --rm \
@@ -113,10 +113,11 @@ docker run --rm \
   cam-imu \
     --target /data/aprilgrid.yaml \
     --cam-chain /data/camchain.yaml \
-    --imu-yaml /data/imu.yaml \
+    --imu-yaml /data/imu0.yaml /data/imu1.yaml \
+    --imu-models calibrated calibrated \
     --h5-file /data/images.h5 \
     --h5-timestamp-file /data/image_timestamps.txt \
-    --imu-csv /data/imu.csv \
+    --imu-csv /data/imu0.csv /data/imu1.csv \
     --output /output
 ```
 
@@ -131,14 +132,32 @@ docker run --rm \
   cam-imu \
     --target /data/aprilgrid.yaml \
     --cam-chain /data/camchain.yaml \
-    --imu-yaml /data/imu.yaml \
+    --imu-yaml /data/imu0.yaml /data/imu1.yaml \
+    --imu-models calibrated calibrated \
     --corner-file /data/corners.pkl \
     --image-timestamp-file /data/image_timestamps.txt \
-    --imu-data-file /data/imu.csv \
+    --imu-data-file /data/imu0.csv /data/imu1.csv \
     --fixture-id 1 \
     --output /output
 ```
 
+ROS bag with multi-camera camchain and multiple IMUs:
+
+```bash
+docker run --rm \
+  -v /path/to/cam_imu.bag:/data/cam_imu.bag:ro \
+  -v /path/to/configs:/cfg:ro \
+  -v /path/to/output:/output \
+  kalibr-camera-calibration:20.04 \
+  cam-imu \
+    --bag /data/cam_imu.bag \
+    --target /cfg/aprilgrid.yaml \
+    --cam-chain /cfg/camchain.yaml \
+    --imu-yaml /cfg/imu0.yaml /cfg/imu1.yaml \
+    --imu-models calibrated calibrated \
+    --imu-delay-by-correlation \
+    --output /output
+```
 Both `cam-cam` and `cam-imu` write `calibration_report.md` and
 `calibration_report.json`. The report contains input diagnostics, parsed Kalibr
 quality metrics, warnings/errors, and concrete data-collection suggestions.

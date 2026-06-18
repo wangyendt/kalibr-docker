@@ -2,18 +2,30 @@
 
 ## 场景
 
-这个仓库对外暴露的是 Docker wrapper，不是原始 Kalibr 工作空间。用户只需要记住镜像 `kalibr-camera-calibration:20.04` 和两个子命令：`cam-cam`、`cam-imu`。
+这个仓库对外主入口是 Docker wrapper，用户只需要记住镜像 `kalibr-camera-calibration:20.04` 和两个子命令：`cam-cam`、`cam-imu`。高级用户仍可在镜像里直接调用原始 `rosrun kalibr ...`，用于低层调试或复刻官方命令。
 
 ## Docker 入口
 
 | 命令 | 用途 | 影响 |
 |---|---|---|
-| `docker build -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04 .` | 构建本地镜像 | 固定 Ubuntu 20.04 / ROS Noetic / Kalibr 环境 |
+| `docker pull wangyendt/kalibr-camera-calibration:20.04` | 拉取公开镜像 | 推荐给外部用户，一键部署，不在本机编译 ROS/Kalibr |
+| `docker build -f docker/camera-calibration/Dockerfile -t kalibr-camera-calibration:20.04 .` | 构建本地镜像 | 适合开发、改 Dockerfile、私有依赖或无法访问镜像仓库时使用 |
+| `docker push wangyendt/kalibr-camera-calibration:20.04` | 发布 DockerHub 镜像 | 公开交付最直接；GHCR 可用 `ghcr.io/<user>/kalibr-camera-calibration:20.04` 同步发布 |
 | `docker run --rm kalibr-camera-calibration:20.04 --help` | 查看总入口 | 验证镜像可用 |
 | `docker run --rm kalibr-camera-calibration:20.04 cam-cam --help` | 查看 cam-cam 参数 | 只覆盖相机/多相机标定 |
 | `docker run --rm kalibr-camera-calibration:20.04 cam-imu --help` | 查看 cam-imu 参数 | 只覆盖 IMU-camera 标定 |
 
 挂载约定：输入目录建议只读挂载为 `:ro`，输出目录挂载为可写。Apple Silicon 或非 amd64 机器可加 `--platform linux/amd64`。
+
+## 支持的输入格式
+
+| 入口 | 支持输入 | 不支持/限制 |
+|---|---|---|
+| `cam-cam` wrapper | 单相机图片目录、单张图片、单视频、`cam0/cam1/...` 多相机图片目录 | 多相机视频不同步；多相机图片要求每路数量一致并按自然排序配对 |
+| `cam-imu` wrapper | 多相机 camchain、一个或多个 IMU YAML；`--bag`、corner-file 三件套或 H5 三件套 | 不直接接收图片目录/视频；多 IMU 的 H5/corner-file 模式要求每个 IMU 一份 CSV |
+| 原始 `kalibr_calibrate_cameras` | ROS bag + 多个 image topics + 对应 camera models | 需要用户自己保证 topic、模型、target 匹配 |
+| 原始 `kalibr_calibrate_imu_camera` | ROS bag、camchain、一个或多个 IMU YAML、target YAML | 多 IMU 要让 `--imu` 和 `--imu-models` 数量一致，第一个 IMU 是参考 IMU |
+| Ceres 子模块 | `pkl`、`bag`、`euroc/mav0` 转换后运行单阶段 Ceres | 当前 Ceres 二进制是单 IMU 标定入口 |
 
 ## `cam-cam` 参数
 
@@ -42,15 +54,18 @@
 |---|---:|---|---|
 | `--target` | 必填 | AprilGrid YAML | 与 cam-cam 相同 |
 | `--cam-chain` | 必填 | cam-cam 输出的 camchain YAML | 决定相机模型、内参、初始外参 |
-| `--imu-yaml` | 必填 | Kalibr IMU 噪声 YAML | 决定 gyro/accel 噪声权重 |
+| `--imu-yaml` | 必填 | 一个或多个 Kalibr IMU 噪声 YAML | 第一个 IMU 是 reference IMU；数量要和 `--imu-models`、多 IMU CSV 数量一致 |
 | `--output` | 必填 | 输出目录 | 写入日志、结果、报告 |
 | `--lang` | `zh` | `zh/en` | 报告语言 |
+| `--bag` | 空 | ROS bag，topic 来自 camchain/IMU YAML | 支持多相机、多 IMU；适合 TUM/EuRoC bag |
+| `--imu-models` | 每个 IMU 为 `calibrated` | 每个 IMU 的模型 | 可选 `calibrated`、`scale-misalignment`、`scale-misalignment-size-effect`；数量必须等于 `--imu-yaml` |
+| `--imu-delay-by-correlation` | 关闭 | 多 IMU 间延迟相关估计 | 多 IMU 时可打开；会增加时间延迟估计自由度 |
 | `--corner-file` | 空 | 预提取角点 pkl | corner-file 模式三件套之一 |
 | `--image-timestamp-file` | 空 | corner-file 对应图像时间戳 | corner-file 模式三件套之一 |
-| `--imu-data-file` | 空 | corner-file 模式 IMU CSV/TXT | corner-file 模式三件套之一 |
+| `--imu-data-file` | 空 | corner-file 模式 IMU CSV/TXT，可传多个 | corner-file 模式三件套之一；多 IMU 时数量必须等于 `--imu-yaml` |
 | `--h5-file` | 空 | H5 图像观测文件 | H5 模式三件套之一 |
 | `--h5-timestamp-file` | 空 | H5 对应图像时间戳 | H5 模式三件套之一 |
-| `--imu-csv` | 空 | H5 模式 IMU CSV | H5 模式三件套之一 |
+| `--imu-csv` | 空 | H5 模式 IMU CSV，可传多个 | H5 模式三件套之一；多 IMU 时数量必须等于 `--imu-yaml` |
 | `--fixture-id` | `fixture` | corner-file 输出命名后缀 | 影响 Kalibr 结果文件名 |
 | `--trim-imu-edge-count` | 空 | 裁掉首尾 IMU 样本数 | benchmark 对齐常用 `1000`，能避开 spline 边界 |
 | `--timeoffset-padding` | `0.03` | spline 时间边界 padding | BenchmarkCalibration 常用 `0.04` |
@@ -64,7 +79,15 @@
 | `--focal-length-init` | 空 | 设置 Kalibr 焦距初值 | 一般 cam-imu 不需要 |
 | `--verbose` | 关闭 | 流式打印 Kalibr 输出 | 调试失败时打开 |
 
-`cam-imu` 必须二选一输入模式：`--corner-file/--image-timestamp-file/--imu-data-file` 或 `--h5-file/--h5-timestamp-file/--imu-csv`，不能混用。
+`cam-imu` 必须三选一输入模式：`--bag`、`--corner-file/--image-timestamp-file/--imu-data-file`、或 `--h5-file/--h5-timestamp-file/--imu-csv`，不能混用。多 IMU 时传多个 `--imu-yaml`，并传同等数量的 `--imu-models`；H5/corner-file 模式还必须传同等数量的 IMU CSV。
+
+## 原始 Kalibr CLI 高级入口
+
+| 场景 | 命令形态 | 影响 |
+|---|---|---|
+| bag 格式多相机 cam-cam | `rosrun kalibr kalibr_calibrate_cameras --bag data.bag --topics /cam0/image_raw /cam1/image_raw --models pinhole-equi pinhole-equi --target aprilgrid.yaml` | 绕过 wrapper，直接使用 bag 内时间戳和 topic |
+| bag 格式单 IMU cam-imu | `rosrun kalibr kalibr_calibrate_imu_camera --bag data.bag --cam camchain.yaml --imu imu.yaml --imu-models calibrated --target aprilgrid.yaml` | 适合 TUM/EuRoC 转 bag 后运行 |
+| bag 格式多 IMU cam-imu | `camera_calibration cam-imu --bag data.bag --cam-chain camchain.yaml --imu-yaml imu0.yaml imu1.yaml --imu-models calibrated calibrated --target aprilgrid.yaml --output out` | wrapper 一键入口；第一个 IMU 为参考 IMU，可加 `--imu-delay-by-correlation` |
 
 ## 结果与判断
 
@@ -81,3 +104,5 @@
 - 没有外部时间戳时，不支持多相机视频同步。
 - `--fast-extraction always` 最快，但如果底层 rosbag/文件系统出现并发读取问题，建议用 `auto`。
 - cam-IMU 的 time offset、knot rate、IMU 裁边会显著影响结果，评测时必须把 Kalibr 与 Ceres 的口径写清楚。
+- 如果目标是让别人真正一键部署，建议发布 DockerHub 或 GHCR 预构建镜像；只让用户 clone 后本地 build 不算一键部署。
+- 多 IMU 已进入 `cam-imu` wrapper；bag 模式通过各 IMU YAML 的 topic 取数，H5/corner-file 模式通过多个 IMU CSV 取数。

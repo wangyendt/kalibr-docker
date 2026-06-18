@@ -75,8 +75,8 @@ def parseArgs():
     groupData.add_argument('--corner_file', dest='corner_file', nargs=1, help='The extracted corner pickle file')
     groupData.add_argument('--h5timestampfile', dest='h5timestampfile', nargs=1, help='The timestamp file for H5 images')
     groupData.add_argument('--image_timestamp_file', dest='image_timestamp_file', nargs=1, help='The timestamp file for extracted image corners')
-    groupData.add_argument('--imufile', dest='imufile', nargs=1, help='The imu file with the data')
-    groupData.add_argument('--imu_data_file', dest='imu_data_file', nargs=1, help='The imu file used with extracted corner data')
+    groupData.add_argument('--imufile', dest='imufile', nargs='+', help='The imu file(s) with the data. Multi-IMU requires one file per --imu yaml.')
+    groupData.add_argument('--imu_data_file', dest='imu_data_file', nargs='+', help='The imu file(s) used with extracted corner data. Multi-IMU requires one file per --imu yaml.')
     groupData.add_argument('--bag-from-to', metavar='bag_from_to', type=float, nargs=2, help='Use the bag data starting from up to this time [s]')
     groupData.add_argument('--bag-freq', metavar='bag_freq', type=float, help='Frequency to extract features at [hz]')
     groupData.add_argument('--perform-synchronization',  action='store_true', dest='perform_synchronization', \
@@ -133,6 +133,10 @@ def parseArgs():
 
     if not parsed.bagfile and not ((parsed.h5file and parsed.h5timestampfile and parsed.imufile) or (parsed.corner_file and parsed.image_timestamp_file and parsed.imu_data_file)):
         parser.error('Specify --bag, or --h5file/--h5timestampfile/--imufile, or --corner_file/--image_timestamp_file/--imu_data_file.')
+    if parsed.imufile and len(parsed.imufile) != len(parsed.imu_yamls):
+        parser.error('For --imufile, provide exactly one IMU data file per --imu yaml.')
+    if parsed.imu_data_file and len(parsed.imu_data_file) != len(parsed.imu_yamls):
+        parser.error('For --imu_data_file, provide exactly one IMU data file per --imu yaml.')
 
     if parsed.verbose:
         parsed.showextraction = True             
@@ -160,9 +164,10 @@ def main():
             
     print("Initializing IMUs:")
     ts_beginning = time.time()
-    if  len(parsed.imu_yamls) == 1 and not parsed.imu_models:
-        #Maintain backwards compatibility with previous interface.
-        parsed.imu_models = ['calibrated']
+    if not parsed.imu_models:
+        # Maintain backwards compatibility with the previous single-IMU interface and
+        # make multi-IMU wrapper calls concise.
+        parsed.imu_models = ['calibrated'] * len(parsed.imu_yamls)
     elif len(parsed.imu_yamls) != len(parsed.imu_models):
         sm.logError("Number of IMU yamls and models has to match.")
         sys.exit(2)

@@ -47,14 +47,17 @@ def _build_parser() -> argparse.ArgumentParser:
     cam_imu = subparsers.add_parser("cam-imu", help="Run Kalibr camera-IMU calibration on the fork's H5/CSV path.")
     cam_imu.add_argument("--target", required=True, help="Target YAML file or folder containing one target YAML.")
     cam_imu.add_argument("--lang", default="zh", choices=["zh", "en"], help="Warning/error language.")
-    cam_imu.add_argument("--cam-chain", required=True, help="Camera chain YAML.")
-    cam_imu.add_argument("--imu-yaml", required=True, help="IMU noise YAML.")
+    cam_imu.add_argument("--cam-chain", required=True, help="Camera chain YAML. It may contain one or more cameras.")
+    cam_imu.add_argument("--imu-yaml", required=True, nargs="+", help="One or more IMU noise YAML files. The first IMU is the reference IMU.")
+    cam_imu.add_argument("--imu-models", nargs="+", choices=["calibrated", "scale-misalignment", "scale-misalignment-size-effect"], help="One IMU model per --imu-yaml. Defaults to calibrated for every IMU.")
+    cam_imu.add_argument("--imu-delay-by-correlation", action="store_true", help="Estimate the delay between multiple IMUs by correlation.")
+    cam_imu.add_argument("--bag", help="ROS bag containing camera and IMU topics from the camchain/IMU YAMLs.")
     cam_imu.add_argument("--h5-file", help="H5 image data file.")
     cam_imu.add_argument("--h5-timestamp-file", help="Image timestamp text file for --h5-file.")
-    cam_imu.add_argument("--imu-csv", help="IMU CSV file in Kalibr-compatible order for --h5-file.")
+    cam_imu.add_argument("--imu-csv", nargs="+", help="One or more IMU CSV files in Kalibr-compatible order for --h5-file. Multi-IMU requires one file per --imu-yaml.")
     cam_imu.add_argument("--corner-file", help="Pre-extracted camera corner pickle file.")
     cam_imu.add_argument("--image-timestamp-file", help="Image timestamp text file for --corner-file.")
-    cam_imu.add_argument("--imu-data-file", help="IMU CSV/TXT file for --corner-file.")
+    cam_imu.add_argument("--imu-data-file", nargs="+", help="One or more IMU CSV/TXT files for --corner-file. Multi-IMU requires one file per --imu-yaml.")
     cam_imu.add_argument("--fixture-id", default="fixture", help="Fixture id appended to corner-file Kalibr outputs.")
     cam_imu.add_argument("--trim-imu-edge-count", type=int, default=None, help="Discard this many IMU samples at both ends.")
     cam_imu.add_argument("--output", required=True, help="Output directory.")
@@ -188,31 +191,50 @@ def _has_all(*values: Any) -> bool:
     return all(value is not None and str(value) != "" for value in values)
 
 
+def _resolve_paths(values: List[str], label: str, imu_count: int) -> List[Path]:
+    paths = [Path(value).expanduser().resolve() for value in values]
+    if len(paths) != imu_count:
+        raise CalibrationError(
+            f"{label} requires one file per --imu-yaml; "
+            f"got {len(paths)} files for {imu_count} IMU YAMLs."
+        )
+    return paths
+
+
 def _run_cam_imu(args: argparse.Namespace) -> int:
     output_dir = ensure_dir(Path(args.output).expanduser().resolve())
     target_yaml = resolve_target(Path(args.target))
     cam_chain = Path(args.cam_chain).expanduser().resolve()
-    imu_yaml = Path(args.imu_yaml).expanduser().resolve()
+    imu_yamls = [Path(value).expanduser().resolve() for value in args.imu_yaml]
+    imu_models = list(args.imu_models) if args.imu_models else ["calibrated"] * len(imu_yamls)
+    if len(imu_models) != len(imu_yamls):
+        raise CalibrationError(
+            f"cam-imu requires one --imu-models value per --imu-yaml; "
+            f"got {len(imu_models)} models for {len(imu_yamls)} IMU YAMLs."
+        )
 
+    bag_mode = _has_all(args.bag)
     h5_mode = _has_all(args.h5_file, args.h5_timestamp_file, args.imu_csv)
     corner_mode = _has_all(args.corner_file, args.image_timestamp_file, args.imu_data_file)
-    if h5_mode == corner_mode:
+    if sum([bag_mode, h5_mode, corner_mode]) != 1:
         raise CalibrationError(
             "cam-imu requires exactly one input mode: "
-            "--h5-file/--h5-timestamp-file/--imu-csv or "
+            "--bag, --h5-file/--h5-timestamp-file/--imu-csv, or "
             "--corner-file/--image-timestamp-file/--imu-data-file."
         )
 
     result = run_cam_imu(
         target_yaml=target_yaml,
         cam_chain=cam_chain,
-        imu_yaml=imu_yaml,
+        imu_yamls=imu_yamls,
+        imu_models=imu_models,
+        bag_file=Path(args.bag).expanduser().resolve() if bag_mode else None,
         h5_file=Path(args.h5_file).expanduser().resolve() if h5_mode else None,
         h5_timestamp_file=Path(args.h5_timestamp_file).expanduser().resolve() if h5_mode else None,
-        imu_csv=Path(args.imu_csv).expanduser().resolve() if h5_mode else None,
+        imu_csv_files=_resolve_paths(args.imu_csv, "--imu-csv", len(imu_yamls)) if h5_mode else None,
         corner_file=Path(args.corner_file).expanduser().resolve() if corner_mode else None,
         image_timestamp_file=Path(args.image_timestamp_file).expanduser().resolve() if corner_mode else None,
-        imu_data_file=Path(args.imu_data_file).expanduser().resolve() if corner_mode else None,
+        imu_data_files=_resolve_paths(args.imu_data_file, "--imu-data-file", len(imu_yamls)) if corner_mode else None,
         fixture_id=args.fixture_id,
         trim_imu_edge_count=args.trim_imu_edge_count,
         output_dir=output_dir,
@@ -222,6 +244,7 @@ def _run_cam_imu(args: argparse.Namespace) -> int:
         bias_knots_per_second=args.bias_knots_per_second,
         no_time_calibration=args.no_time_calibration,
         export_poses=args.export_poses,
+        estimate_imu_delay=args.imu_delay_by_correlation,
         focal_length_init=args.focal_length_init,
         log_path=output_dir / "kalibr_cam_imu.log",
         stream=args.verbose,
@@ -240,7 +263,7 @@ def _run_cam_imu(args: argparse.Namespace) -> int:
         output_dir=output_dir,
         target_yaml=target_yaml,
         cam_chain=cam_chain,
-        imu_yaml=imu_yaml,
+        imu_yamls=imu_yamls,
         command_args=_namespace_to_dict(args),
         kalibr_result=result,
         calibration_quality=quality,

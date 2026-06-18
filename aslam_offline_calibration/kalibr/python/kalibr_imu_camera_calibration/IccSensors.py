@@ -629,11 +629,11 @@ class IccImu(object):
 
         #load dataset
         if getattr(parsed, 'imu_data_file', None):
-            self.dataset = initImuBinDataset(parsed.imu_data_file[0], '/imu0', \
+            self.dataset = initImuBinDataset(parsed.imu_data_file[imuNr], '/imu{0}'.format(imuNr), \
                                              parsed.bag_from_to, parsed.perform_synchronization)
             self.trimImuEdgeCount = getattr(parsed, 'trim_imu_edge_count', 1000)
         elif getattr(parsed, 'imufile', None):
-            self.dataset = initImuBinDataset(parsed.imufile[0], '/imu0', \
+            self.dataset = initImuBinDataset(parsed.imufile[imuNr], '/imu{0}'.format(imuNr), \
                                              parsed.bag_from_to, parsed.perform_synchronization)
             self.trimImuEdgeCount = getattr(parsed, 'trim_imu_edge_count', 0)
         elif getattr(parsed, 'bagfile', None):
