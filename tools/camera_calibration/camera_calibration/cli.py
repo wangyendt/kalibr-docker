@@ -1,10 +1,11 @@
 import argparse
+import re
 import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .common import CalibrationError, UserMessage, dedupe_messages, ensure_dir, format_messages, info, parse_size
+from .common import CalibrationError, UserMessage, dedupe_messages, ensure_dir, format_messages, info, natural_key, parse_size, read_yaml
 from .diagnostics import analyze_dataset
 from .image_normalizer import prepare_dataset
 from .input_resolver import resolve_input, resolve_target
@@ -48,16 +49,16 @@ def _build_parser() -> argparse.ArgumentParser:
     cam_imu.add_argument("--target", required=True, help="Target YAML file or folder containing one target YAML.")
     cam_imu.add_argument("--lang", default="zh", choices=["zh", "en"], help="Warning/error language.")
     cam_imu.add_argument("--cam-chain", required=True, help="Camera chain YAML. It may contain one or more cameras.")
-    cam_imu.add_argument("--imu-yaml", required=True, nargs="+", help="One or more IMU noise YAML files. The first IMU is the reference IMU.")
-    cam_imu.add_argument("--imu-models", nargs="+", choices=["calibrated", "scale-misalignment", "scale-misalignment-size-effect"], help="One IMU model per --imu-yaml. Defaults to calibrated for every IMU.")
+    cam_imu.add_argument("--imu-yaml", required=True, nargs="+", help="One or more IMU YAML files. Supports flat Kalibr YAML, nested Kalibr result YAML, or one aggregate YAML containing imu0/imu1/... entries. The first expanded IMU is the reference IMU.")
+    cam_imu.add_argument("--imu-models", nargs="+", choices=["calibrated", "scale-misalignment", "scale-misalignment-size-effect"], help="One IMU model for all expanded IMUs, or one model per expanded IMU. Defaults to calibrated for every IMU.")
     cam_imu.add_argument("--imu-delay-by-correlation", action="store_true", help="Estimate the delay between multiple IMUs by correlation.")
     cam_imu.add_argument("--bag", help="ROS bag containing camera and IMU topics from the camchain/IMU YAMLs.")
     cam_imu.add_argument("--h5-file", help="H5 image data file.")
     cam_imu.add_argument("--h5-timestamp-file", help="Image timestamp text file for --h5-file.")
-    cam_imu.add_argument("--imu-csv", nargs="+", help="One or more IMU CSV files in Kalibr-compatible order for --h5-file. Multi-IMU requires one file per --imu-yaml.")
+    cam_imu.add_argument("--imu-csv", nargs="+", help="One or more IMU CSV files in Kalibr-compatible order for --h5-file. Multi-IMU requires one file per expanded IMU.")
     cam_imu.add_argument("--corner-file", help="Pre-extracted camera corner pickle file.")
     cam_imu.add_argument("--image-timestamp-file", help="Image timestamp text file for --corner-file.")
-    cam_imu.add_argument("--imu-data-file", nargs="+", help="One or more IMU CSV/TXT files for --corner-file. Multi-IMU requires one file per --imu-yaml.")
+    cam_imu.add_argument("--imu-data-file", nargs="+", help="One or more IMU CSV/TXT files for --corner-file. Multi-IMU requires one file per expanded IMU.")
     cam_imu.add_argument("--fixture-id", default="fixture", help="Fixture id appended to corner-file Kalibr outputs.")
     cam_imu.add_argument("--trim-imu-edge-count", type=int, default=None, help="Discard this many IMU samples at both ends.")
     cam_imu.add_argument("--output", required=True, help="Output directory.")
@@ -195,23 +196,99 @@ def _resolve_paths(values: List[str], label: str, imu_count: int) -> List[Path]:
     paths = [Path(value).expanduser().resolve() for value in values]
     if len(paths) != imu_count:
         raise CalibrationError(
-            f"{label} requires one file per --imu-yaml; "
-            f"got {len(paths)} files for {imu_count} IMU YAMLs."
+            f"{label} requires one file per expanded IMU; "
+            f"got {len(paths)} files for {imu_count} expanded IMUs."
         )
     return paths
+
+
+_IMU_REQUIRED_KEYS = {
+    "update_rate",
+    "accelerometer_noise_density",
+    "accelerometer_random_walk",
+    "gyroscope_noise_density",
+    "gyroscope_random_walk",
+}
+
+
+def _is_flat_imu_config(data: Any) -> bool:
+    return isinstance(data, dict) and _IMU_REQUIRED_KEYS.issubset(set(data.keys()))
+
+
+def _safe_imu_label(value: Any) -> str:
+    label = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("_")
+    return label or "imu"
+
+
+def _imu_configs_from_yaml(path: Path) -> List[Dict[str, Any]]:
+    data = read_yaml(path)
+    if _is_flat_imu_config(data):
+        return [dict(data)]
+
+    candidates: List[Any] = []
+    if isinstance(data.get("imus"), list):
+        candidates.extend(data["imus"])
+    elif isinstance(data.get("imus"), dict):
+        candidates.extend(data["imus"][key] for key in sorted(data["imus"].keys(), key=natural_key))
+    else:
+        imu_keys = [key for key, value in data.items() if re.fullmatch(r"imu\d+", str(key)) and isinstance(value, dict)]
+        candidates.extend(data[key] for key in sorted(imu_keys, key=natural_key))
+
+    configs = [dict(candidate) for candidate in candidates if _is_flat_imu_config(candidate)]
+    if not configs:
+        raise CalibrationError(
+            f"{path} is not a supported IMU YAML. Use a flat Kalibr IMU YAML, "
+            "a nested Kalibr result YAML with imu0/imu1/... entries, or an aggregate YAML."
+        )
+    return configs
+
+
+def _normalize_imu_yamls(imu_yamls: List[Path], output_dir: Path) -> List[Path]:
+    import yaml
+
+    normalized_dir = ensure_dir(output_dir / "work_cam_imu" / "normalized_imus")
+    for stale in normalized_dir.glob("*.yaml"):
+        if stale.is_file() or stale.is_symlink():
+            stale.unlink()
+
+    normalized: List[Path] = []
+    for source in imu_yamls:
+        configs = _imu_configs_from_yaml(source)
+        for local_index, config in enumerate(configs):
+            imu_index = len(normalized)
+            flat_config = dict(config)
+            flat_config.setdefault("rostopic", f"/imu{imu_index}")
+            label = _safe_imu_label(f"{source.stem}_{local_index}")
+            dst = normalized_dir / f"imu{imu_index}_{label}.yaml"
+            dst.write_text(yaml.safe_dump(flat_config, sort_keys=False), encoding="utf-8")
+            normalized.append(dst)
+
+    if not normalized:
+        raise CalibrationError("cam-imu requires at least one expanded IMU YAML.")
+    return normalized
+
+
+def _expand_imu_models(models: Any, imu_count: int) -> List[str]:
+    if not models:
+        return ["calibrated"] * imu_count
+    expanded = list(models)
+    if len(expanded) == 1 and imu_count > 1:
+        return expanded * imu_count
+    if len(expanded) != imu_count:
+        raise CalibrationError(
+            f"cam-imu requires either one --imu-models value for all IMUs or one per expanded IMU; "
+            f"got {len(expanded)} models for {imu_count} expanded IMUs."
+        )
+    return expanded
 
 
 def _run_cam_imu(args: argparse.Namespace) -> int:
     output_dir = ensure_dir(Path(args.output).expanduser().resolve())
     target_yaml = resolve_target(Path(args.target))
     cam_chain = Path(args.cam_chain).expanduser().resolve()
-    imu_yamls = [Path(value).expanduser().resolve() for value in args.imu_yaml]
-    imu_models = list(args.imu_models) if args.imu_models else ["calibrated"] * len(imu_yamls)
-    if len(imu_models) != len(imu_yamls):
-        raise CalibrationError(
-            f"cam-imu requires one --imu-models value per --imu-yaml; "
-            f"got {len(imu_models)} models for {len(imu_yamls)} IMU YAMLs."
-        )
+    raw_imu_yamls = [Path(value).expanduser().resolve() for value in args.imu_yaml]
+    imu_yamls = _normalize_imu_yamls(raw_imu_yamls, output_dir)
+    imu_models = _expand_imu_models(args.imu_models, len(imu_yamls))
 
     bag_mode = _has_all(args.bag)
     h5_mode = _has_all(args.h5_file, args.h5_timestamp_file, args.imu_csv)

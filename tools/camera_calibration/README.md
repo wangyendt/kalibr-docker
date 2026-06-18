@@ -114,7 +114,7 @@ docker run --rm \
     --target /data/aprilgrid.yaml \
     --cam-chain /data/camchain.yaml \
     --imu-yaml /data/imu0.yaml /data/imu1.yaml \
-    --imu-models calibrated calibrated \
+    --imu-models calibrated \
     --h5-file /data/images.h5 \
     --h5-timestamp-file /data/image_timestamps.txt \
     --imu-csv /data/imu0.csv /data/imu1.csv \
@@ -133,7 +133,7 @@ docker run --rm \
     --target /data/aprilgrid.yaml \
     --cam-chain /data/camchain.yaml \
     --imu-yaml /data/imu0.yaml /data/imu1.yaml \
-    --imu-models calibrated calibrated \
+    --imu-models calibrated \
     --corner-file /data/corners.pkl \
     --image-timestamp-file /data/image_timestamps.txt \
     --imu-data-file /data/imu0.csv /data/imu1.csv \
@@ -154,10 +154,16 @@ docker run --rm \
     --target /cfg/aprilgrid.yaml \
     --cam-chain /cfg/camchain.yaml \
     --imu-yaml /cfg/imu0.yaml /cfg/imu1.yaml \
-    --imu-models calibrated calibrated \
+    --imu-models calibrated \
     --imu-delay-by-correlation \
     --output /output
 ```
+
+`--imu-yaml` accepts several shapes: multiple flat Kalibr input YAMLs, multiple
+nested Kalibr result YAMLs with `imu0:` at the top, or one aggregate YAML with
+`imu0`, `imu1`, ... entries. The wrapper expands these to flat YAMLs before
+calling Kalibr. There is no wrapper-defined maximum IMU count; practical limits
+come from Kalibr problem size, memory, runtime, and shell command length.
 Both `cam-cam` and `cam-imu` write `calibration_report.md` and
 `calibration_report.json`. The report contains input diagnostics, parsed Kalibr
 quality metrics, warnings/errors, and concrete data-collection suggestions.

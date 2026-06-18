@@ -9,7 +9,7 @@
 | 能力 | 输入 | 输出 |
 |---|---|---|
 | `cam-cam` | 单相机图片、单视频、`cam0/cam1/...` 多相机图片目录 + AprilGrid YAML | Kalibr camchain、FOV、Markdown/JSON 诊断报告 |
-| `cam-imu` wrapper | 多相机 camchain、一个或多个 IMU YAML、bag，或 corner-file/H5 + 每个 IMU 一份 CSV | Kalibr IMU-camera 标定结果、日志、报告 |
+| `cam-imu` wrapper | 多相机 camchain、flat/nested/聚合 IMU YAML、bag，或 corner-file/H5 + 每个展开后的 IMU 一份 CSV | Kalibr IMU-camera 标定结果、日志、报告 |
 | 原始 Kalibr CLI | ROS bag、camchain、一个或多个 IMU YAML | 低层调试和复刻官方命令 |
 | 批量/离线交付 | DockerHub/GHCR 镜像、Docker image tar 或本地 build | 任意装了 Docker 的机器一键运行 |
 
@@ -42,7 +42,7 @@ docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output:/output kalibr-came
 ## 当前支持的输入
 
 - `cam-cam` wrapper：图片目录、单视频、单张图片、`cam0/cam1/...` 多相机图片目录；多相机要求每路图片数量一致并按文件名自然排序同步。
-- `cam-imu` wrapper：多相机 camchain、一个或多个 `--imu-yaml`、`--bag`，或 corner-file/H5 + 图像时间戳 + 每个 IMU 一份 CSV；这是离线标定入口，不是直接吃图片目录的入口。
+- `cam-imu` wrapper：多相机 camchain、一个或多个 `--imu-yaml`、`--bag`，或 corner-file/H5 + 图像时间戳 + 每个展开后的 IMU 一份 CSV；`--imu-yaml` 支持 flat 输入 YAML、Kalibr 输出型 nested YAML，以及一个包含 `imu0/imu1/...` 的聚合 YAML。
 - 原始 Kalibr CLI：镜像里仍可直接运行 `rosrun kalibr ...`，用于低层调试、复刻官方命令或检查 wrapper 生成的命令。
 - 当前 wrapper 不做多相机视频同步；没有外部时间戳时无法判断多个视频之间的同步关系。
 
@@ -52,7 +52,7 @@ docker run --rm -v /ABS/cam_imu_data:/data:ro -v /ABS/output:/output kalibr-came
 - `cam-cam` 会自动整理图片/视频、生成 bag、跑 Kalibr、输出报告。
 - 支持 `--fast-extraction auto`：优先多进程提角点，遇到 rosbag 并发读取异常自动回退单线程。
 - 报告里直接给 warning/error、补拍建议、每个 pinhole 相机的 `hfov/vfov/dfov`。
-- `cam-imu` 支持 bag、corner-file、H5 三种输入；多 IMU 时每个 IMU YAML 对应 bag topic 或一份 IMU CSV。
+- `cam-imu` 支持 bag、corner-file、H5 三种输入；多 IMU 没有人为数量上限，实际限制来自 Kalibr 优化规模、内存和运行时间。
 
 ## Ceres Cam-IMU 子工程
 
@@ -94,7 +94,7 @@ docker run --rm kalibr-camera-calibration:20.04 cam-cam --help
 docker run --rm kalibr-camera-calibration:20.04 cam-imu --help
 ```
 
-Supported inputs: the wrapper handles image folders, one video, multi-camera image folders, and offline cam-IMU bag/corner-file/H5 inputs. `cam-imu` accepts multiple IMU YAMLs; bag mode reads the topics from those YAMLs, and corner-file/H5 modes take one IMU CSV per IMU.
+Supported inputs: the wrapper handles image folders, one video, multi-camera image folders, and offline cam-IMU bag/corner-file/H5 inputs. `cam-imu` accepts flat, nested, or aggregate IMU YAMLs; bag mode reads topics from the expanded YAMLs, and corner-file/H5 modes take one IMU CSV per expanded IMU.
 
 What this fork adds:
 
