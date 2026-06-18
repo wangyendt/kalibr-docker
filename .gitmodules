@@ -1,3 +1,4 @@
 [submodule "kalibr-camimu-ceres"]
 	path = kalibr-camimu-ceres
 	url = ../kalibr-camimu-ceres.git
+	branch = master
