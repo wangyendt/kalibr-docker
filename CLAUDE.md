@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **kalibr-docker** (19878 symbols, 29712 relationships, 240 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **kalibr-docker** (20119 symbols, 30000 relationships, 239 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -39,5 +39,25 @@ This project is indexed by GitNexus as **kalibr-docker** (19878 symbols, 29712 r
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+| Work in the Test area (176 symbols) | `.claude/skills/generated/test/SKILL.md` |
+| Work in the Implementation area (151 symbols) | `.claude/skills/generated/implementation/SKILL.md` |
+| Work in the Backend area (89 symbols) | `.claude/skills/generated/backend/SKILL.md` |
+| Work in the Camera_calibration area (62 symbols) | `.claude/skills/generated/camera-calibration/SKILL.md` |
+| Work in the Tools area (56 symbols) | `.claude/skills/generated/tools/SKILL.md` |
+| Work in the Io area (53 symbols) | `.claude/skills/generated/io/SKILL.md` |
+| Work in the Kalibr_common area (49 symbols) | `.claude/skills/generated/kalibr-common/SKILL.md` |
+| Work in the Kinematics area (44 symbols) | `.claude/skills/generated/kinematics/SKILL.md` |
+| Work in the Optimizer area (41 symbols) | `.claude/skills/generated/optimizer/SKILL.md` |
+| Work in the Residuals area (35 symbols) | `.claude/skills/generated/residuals/SKILL.md` |
+| Work in the Algorithms area (34 symbols) | `.claude/skills/generated/algorithms/SKILL.md` |
+| Work in the Kalibr_camera_calibration area (33 symbols) | `.claude/skills/generated/kalibr-camera-calibration/SKILL.md` |
+| Work in the Interp_rotation area (29 symbols) | `.claude/skills/generated/interp-rotation/SKILL.md` |
+| Work in the Variables area (22 symbols) | `.claude/skills/generated/variables/SKILL.md` |
+| Work in the Apps area (20 symbols) | `.claude/skills/generated/apps/SKILL.md` |
+| Work in the Aslam area (17 symbols) | `.claude/skills/generated/aslam/SKILL.md` |
+| Work in the Sm area (16 symbols) | `.claude/skills/generated/sm/SKILL.md` |
+| Work in the Base area (16 symbols) | `.claude/skills/generated/base/SKILL.md` |
+| Work in the Apriltags area (16 symbols) | `.claude/skills/generated/apriltags/SKILL.md` |
+| Work in the Statistics area (14 symbols) | `.claude/skills/generated/statistics/SKILL.md` |
 
 <!-- gitnexus:end -->
