@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
           token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Configure git author
@@ -39,8 +39,9 @@ jobs:
           old_sha="$(git rev-parse HEAD:kalibr-camimu-ceres)"
 
           git submodule sync -- kalibr-camimu-ceres
-          git submodule update --init --recursive -- kalibr-camimu-ceres
-          git submodule update --remote --recursive -- kalibr-camimu-ceres
+          git submodule update --init -- kalibr-camimu-ceres
+          git -C kalibr-camimu-ceres fetch origin master
+          git -C kalibr-camimu-ceres checkout --detach FETCH_HEAD
 
           new_sha="$(git -C kalibr-camimu-ceres rev-parse HEAD)"
 
